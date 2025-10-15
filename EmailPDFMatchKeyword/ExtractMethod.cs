@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Tesseract;
 
 namespace EmailPDFMatchKeyword
@@ -32,11 +33,11 @@ namespace EmailPDFMatchKeyword
     private GoogleSheetHelper _sheetHelper;
 
 
-    public void InsertDataIntoSheetORDataBase(string provider, string caseNumber, string claimantName, string incidentDate, int pages, string Matchstatus, string SCRIBETEAM)
+    public async Task InsertDataIntoSheetORDataBase(string provider, string caseNumber, string claimantName, string incidentDate, int pages, string Matchstatus, string SCRIBETEAM)
     {
       try
       {
-
+        _mainForm.ShowLoader();
         // Get current US Eastern Time
         TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
         DateTime usNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, easternZone);
@@ -127,7 +128,7 @@ namespace EmailPDFMatchKeyword
 
 
             _mainForm.Log("Proceeding to calculate previous sheet data and send email...");
-            CalculateAndSendEmail(); // Call the method to calculate and send the email
+            await CalculateAndSendEmailAsync(); // Call the method to calculate and send the email
             _mainForm.Log("Sheet Data Calculated & Email send Successfully");
           }
           catch (Exception ex)
@@ -215,6 +216,7 @@ namespace EmailPDFMatchKeyword
           var updateRequest = sheetsService.Spreadsheets.Values.Update(valueRange, _spreadsheetId, insertRange);
           updateRequest.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
           updateRequest.Execute();
+          _mainForm.HideLoader();
 
           _mainForm.Log($"✅ Row inserted at {todaySheetName}!A{insertRow + 1} for provider {provider}");
 
@@ -1021,8 +1023,8 @@ namespace EmailPDFMatchKeyword
     {
       foreach (var row in rows)
       {
-        string rowText = string.Concat(row).Trim(); 
-        //string rowText = string.Join(" ", row).Trim();
+        //string rowText = string.Concat(row).Trim(); 
+        string rowText = string.Join(" ", row).Trim();
 
         if (rowText.IndexOf("regarding", StringComparison.OrdinalIgnoreCase) >= 0)
         {
@@ -1097,6 +1099,11 @@ namespace EmailPDFMatchKeyword
       return pages;
     }
 
+    public async Task<List<Bitmap>> ConvertPdfToImages_2Async(Stream pdfStream)
+    {
+      return await Task.Run(() => ConvertPdfToImages_2(pdfStream));
+    }
+
     public List<Bitmap> ConvertPdfToImages_2(Stream pdfStream)
     {
       var images = new List<Bitmap>();
@@ -1109,9 +1116,16 @@ namespace EmailPDFMatchKeyword
 
         _mainForm.Log("[PDF] Setting Ghostscript directory...");
 
-        string ghostscriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ghostscript", "bin");
-        if (Directory.Exists(ghostscriptPath))
-          MagickNET.SetGhostscriptDirectory(ghostscriptPath);
+        //string ghostscriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ghostscript", "bin");
+        //if (Directory.Exists(ghostscriptPath))
+        //  MagickNET.SetGhostscriptDirectory(ghostscriptPath);
+
+        //// ✅ Ensure MagickTemp directory exists
+        //string magickTempPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MagickTemp");
+        //if (!Directory.Exists(magickTempPath))
+        //  Directory.CreateDirectory(magickTempPath);
+
+        //MagickNET.SetTempDirectory(magickTempPath);
 
         using (var collection = new MagickImageCollection())
         {
@@ -1146,6 +1160,11 @@ namespace EmailPDFMatchKeyword
       }
       _mainForm.Log($"[PDF] Finished conversion. Total images: {images.Count}");
       return images;
+    }
+
+    public async Task<List<Bitmap>> ConvertPdfToImagesAsync(Stream pdfStream)
+    {
+      return await Task.Run(() => ConvertPdfToImages(pdfStream));
     }
 
     public List<Bitmap> ConvertPdfToImages(Stream pdfStream)
@@ -1272,11 +1291,17 @@ namespace EmailPDFMatchKeyword
       return resultTable;
     }
 
+    public async Task<List<List<string>>> ExtractTableRowsFromImageAsync(Bitmap image)
+    {
+      return await Task.Run(() => ExtractTableRowsFromImage(image));
+    }
+
     public List<List<string>> ExtractTableRowsFromImage(Bitmap image)
     {
       var tableRows = new List<List<string>>();
       try
       {
+        _mainForm.ShowLoader();
         string tessDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
         _mainForm.Log($"[OCR] Using tessdata path: {tessDataPath}");
 
@@ -1323,6 +1348,7 @@ namespace EmailPDFMatchKeyword
               }
               if (row != null) tableRows.Add(row);
               _mainForm.Log($"[OCR] Extracted {tableRows.Count} rows from image.");
+              _mainForm.HideLoader();
             }
           }
         }
@@ -1383,6 +1409,7 @@ namespace EmailPDFMatchKeyword
     {
       try
       {
+        
         // --- Get current US Eastern Time ---
         TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
         DateTime usNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, easternZone);
@@ -1400,6 +1427,7 @@ namespace EmailPDFMatchKeyword
 
         try
         {
+          _mainForm.ShowLoader();
           // Create folder if it doesn't exist
           if (!Directory.Exists(saveFolder))
           {
@@ -1448,6 +1476,7 @@ namespace EmailPDFMatchKeyword
             {
               _mainForm.Log($"Error saving file '{safeFileName}': {ex.Message}");
             }
+            _mainForm.HideLoader();
           }
         }
         catch (Exception ex)
@@ -1464,6 +1493,7 @@ namespace EmailPDFMatchKeyword
 
         try
         {
+          _mainForm.ShowLoader();
           // Find subfolders inside parent
           var listRequest = Driveservices.Files.List();
           listRequest.Q = $"mimeType='application/vnd.google-apps.folder' and trashed=false and '{parentFolderId}' in parents";
@@ -1494,12 +1524,14 @@ namespace EmailPDFMatchKeyword
             if (matchedFolderId == null)
               _mainForm.Log($"❌ No matching folder found for provider '{PROVIDER}' in Drive folder.");
           }
+          _mainForm.HideLoader();
 
           // === Upload files into matched Drive folder ===
           if (matchedFolderId != null)
           {
             try
             {
+              _mainForm.ShowLoader();
               // Determine folder name based on status
               string baseFolderName = Path.GetFileName(saveFolder);
               string folderNameToCreate = baseFolderName;
@@ -1567,6 +1599,7 @@ namespace EmailPDFMatchKeyword
                       string fileUrl = uploadedFile.WebViewLink ?? $"https://drive.google.com/file/d/{uploadedFile.Id}/view";
                       _mainForm.Log($"Uploaded '{fileName}' → Subfolder '{createdFolder.Name}'");
                       _mainForm.Log($"File URL: {fileUrl}");
+                      _mainForm.HideLoader();
                     }
                   }
                 }
@@ -1593,8 +1626,15 @@ namespace EmailPDFMatchKeyword
       }
     }
 
-    public void CalculateAndSendEmail()
+
+    public async Task CalculateAndSendEmailAsync()
     {
+      await Task.Run(() => CalculateAndSendEmail());
+    }
+
+    public async Task CalculateAndSendEmail()
+    {
+      _mainForm.ShowLoader();
       TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
       DateTime usNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, easternZone);
       _mainForm.Log($"⏰ Current US (Eastern) time: {usNow}");
@@ -1611,11 +1651,14 @@ namespace EmailPDFMatchKeyword
       string targetSheetNameToProcess = isAfterFivePM ? todaySheetName : GetPreviousSheetName(todaySheetName);
 
       // Retrieve data from the selected sheet (team name => record count)
-      var teamRecordCounts = GetTeamRecordCounts(targetSheetNameToProcess);
+      //var teamRecordCounts = GetTeamRecordCounts(targetSheetNameToProcess);
+      var teamRecordCounts = await GetTeamRecordCountsAsync(targetSheetNameToProcess);
+
 
       // Send email
       _mainForm.Log("📧 Sending email with calculated data...");
-      SendEmailWithCalculatedData(teamRecordCounts, targetSheetNameToProcess);
+      await SendEmailWithCalculatedData(teamRecordCounts, targetSheetNameToProcess);
+      _mainForm.HideLoader();
       _mainForm.Log("✅ Email sent successfully.");
     }
 
@@ -1625,138 +1668,150 @@ namespace EmailPDFMatchKeyword
       return currentDate.AddDays(-1).ToString("MM/dd", CultureInfo.InvariantCulture);
     }
 
-    private Dictionary<string, Dictionary<string, int>> GetTeamRecordCounts(string sheetName)
+    public async Task<Dictionary<string, int>> GetTeamRecordCountsAsync(string sheetName)
     {
-      var result = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+      return await Task.Run(() => GetTeamRecordCounts(sheetName));
+    }
+    private async Task<Dictionary<string, int>> GetTeamRecordCounts(string sheetName)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-      try
-      {
-        var sheetsService = _mainForm.SheetsService;
-
-        // ✅ Replace / in sheet name (Google Sheets API can't parse /)
-        var safeSheetName = sheetName.Replace("/", "-");
-        var range = $"'{sheetName}'!A1:Z500";
-
-        _mainForm.Log($"📄 Reading data from sheet range: {range}");
-
-        var request = sheetsService.Spreadsheets.Values.Get(_spreadsheetId, range);
-        var response = request.Execute();
-        var values = response.Values;
-
-        if (values == null || values.Count == 0)
+        try
         {
-          _mainForm.Log($"❌ No data found in sheet '{safeSheetName}'.");
-          return result;
-        }
+            _mainForm.ShowLoader();
+            var sheetsService = _mainForm.SheetsService;
+            var range = $"'{sheetName}'!A1:Z1000";
 
-        string currentTeam = null;
+            _mainForm.Log($"📄 Reading data from sheet range: {range}");
 
-        for (int i = 0; i < values.Count; i++)
-        {
-          var row = values[i];
-          if (row == null || row.Count == 0)
-            continue;
+            var request = sheetsService.Spreadsheets.Values.Get(_spreadsheetId, range);
+            var response = await request.ExecuteAsync();
+            var values = response.Values;
 
-          string firstCell = row[0]?.ToString().Trim();
-
-          // ✅ Detect TEAM NAME rows (like "SARAH")
-          if (!string.IsNullOrWhiteSpace(firstCell)
-              && firstCell.All(c => !char.IsDigit(c))
-              && firstCell.Equals(firstCell.ToUpperInvariant())
-              && row.Count < 5)
-          {
-            currentTeam = firstCell;
-            if (!result.ContainsKey(currentTeam))
-              result[currentTeam] = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-
-            _mainForm.Log($"📍 Found team header: {currentTeam}");
-            continue;
-          }
-
-          // ✅ Detect DATA ROWS (start with a number)
-          if (int.TryParse(firstCell, out _))
-          {
-            // SCRIBE TEAM is column E (index 4)
-            string scribeTeam = row.ElementAtOrDefault(4)?.ToString().Trim();
-
-            if (!string.IsNullOrEmpty(currentTeam) && !string.IsNullOrEmpty(scribeTeam))
+            if (values == null || values.Count == 0)
             {
-              if (!result[currentTeam].ContainsKey(scribeTeam))
-                result[currentTeam][scribeTeam] = 0;
-
-              result[currentTeam][scribeTeam]++;
+                _mainForm.Log($"❌ No data found in sheet '{sheetName}'.");
+                return result;
             }
-          }
-        }
 
-        // ✅ Log final counts for debug
-        _mainForm.Log("✅ Team Record Summary:");
-        foreach (var team in result)
+            string currentTeam = null;
+            int totalDataRows = 0;
+
+            for (int i = 0; i < values.Count; i++)
+            {
+                var row = values[i];
+                if (row == null || row.Count == 0)
+                    continue;
+
+                string firstCell = row[0]?.ToString().Trim();
+                if (string.IsNullOrWhiteSpace(firstCell))
+                    continue;
+
+                // Detect TEAM HEADER rows
+                bool looksLikeTeamHeader =
+                    !firstCell.Any(char.IsDigit) &&
+                    (row.Count <= 5) &&
+                    firstCell.Length >= 3 &&
+                    firstCell.ToUpperInvariant() == firstCell.Trim().ToUpperInvariant();
+
+                if (looksLikeTeamHeader)
+                {
+                    currentTeam = firstCell.Trim().ToUpperInvariant();
+
+                    if (!result.ContainsKey(currentTeam))
+                        result[currentTeam] = 0;
+
+                    _mainForm.Log($"📍 Found team header: {currentTeam}");
+                    continue;
+                }
+
+                // Detect data rows (start with a number)
+                if (int.TryParse(firstCell, out _))
+                {
+                    string teamKey = (currentTeam ?? "UNKNOWN").Trim().ToUpperInvariant();
+
+                    if (teamKey == "UNKNOWN")
+                        _mainForm.Log($"⚠️ Row {i + 1}: Data found before any team header — assigning to UNKNOWN.");
+
+                    if (!result.ContainsKey(teamKey))
+                        result[teamKey] = 0;
+
+                    result[teamKey]++;
+                    totalDataRows++;
+                }
+            }
+
+            // ✅ Log full summary
+            _mainForm.Log("✅ Team Record Summary (All Teams):");
+            foreach (var team in result)
+            {
+                _mainForm.Log($"📋 {team.Key}: {team.Value} records");
+            }
+
+            _mainForm.Log($"📊 TOTAL data rows processed: {totalDataRows}");
+        }
+        catch (Exception ex)
         {
-          _mainForm.Log($"📋 {team.Key}:");
-          foreach (var member in team.Value)
-            _mainForm.Log($"  - {member.Key}: {member.Value} records");
+            _mainForm.Log($"❌ Error reading team counts from '{sheetName}': {ex.Message}");
         }
-      }
-      catch (Exception ex)
-      {
-        _mainForm.Log($"❌ Error reading team counts from '{sheetName}': {ex.Message}");
-      }
+        finally
+        {
+            _mainForm.HideLoader();
+        }
 
-      return result;
+        return result;
     }
 
-
-    private async void SendEmailWithCalculatedData(Dictionary<string, Dictionary<string, int>> teamRecordCounts, string targetSheetNameToProcess)
+    private async Task SendEmailWithCalculatedData(Dictionary<string, int> teamRecordCounts, string targetSheetNameToProcess)
     {
-      var sb = new StringBuilder();
+        _mainForm.ShowLoader();
+        var sb = new StringBuilder();
 
-      // --- Header message ---
-      sb.AppendLine("<p>Hello,</p>");
-      sb.AppendLine($"<p>This is to notify you that we have finalized the ISG Peer reviwes for date: <strong>{targetSheetNameToProcess}</strong> summary and the brief details are as below:</p>");
-      sb.AppendLine("<br>");
-      sb.AppendLine("<h2>📊 Calculated Data Summary</h2>");
-
-      foreach (var team in teamRecordCounts)
-      {
-        var teamName = team.Key;
-        var memberDict = team.Value;
-
-        if (memberDict == null || memberDict.Count == 0)
-          continue;
-
-        //// Combine member names into a single line
-        //string memberList = string.Join(", ", memberDict.Keys);
-
-        // Sum total records for this team
-        int totalRecords = memberDict.Values.Sum();
-
-        sb.AppendLine($"<h3>📋 {teamName}</h3>");
-        //sb.AppendLine($"<p><strong>Provider:</strong> {memberList}</p>");
-        sb.AppendLine($"<p><strong>Total Records:</strong> {totalRecords}</p>");
+        // --- Header message ---
+        sb.AppendLine("<p>Hello,</p>");
+        sb.AppendLine($"<p>This is to notify you that we have finalized the ISG Peer reviews for date: <strong>{targetSheetNameToProcess}</strong> summary and the brief details are as below:</p>");
         sb.AppendLine("<br>");
-      }
+        sb.AppendLine("<h2>📊 Calculated Data Summary</h2>");
 
-      string emailSubject = "✅ Calculated Data Summary Report";
-      string emailBody = sb.ToString();
-      //string CalculateDataEmail = AppSettingsHelper.Get("CalculateDataEmail");
+        if (teamRecordCounts == null || teamRecordCounts.Count == 0)
+        {
+            sb.AppendLine("<p><strong>No team data found for this date.</strong></p>");
+        }
+        else
+        {
+            int grandTotal = 0;
 
+            // Loop through each team and output only the team name and total records
+            foreach (var team in teamRecordCounts)
+            {
+                sb.AppendLine($"<h3>📋 {team.Key}</h3>");
+                sb.AppendLine($"<p><strong>Total Records:</strong> {team.Value}</p>");
+                sb.AppendLine("<br>");
+                grandTotal += team.Value;
+            }
 
-      _mainForm.Log("📧 Sending formatted HTML email...");
+            sb.AppendLine("<hr>");
+            sb.AppendLine($"<h3>📊 <strong>Overall Total Records:</strong> {grandTotal}</h3>");
+        }
 
-      var toList = AppSettingsHelper.Get("EmailTO")
+        string emailSubject = "✅ Calculated Data Summary Report";
+        string emailBody = sb.ToString();
+
+        _mainForm.Log("📧 Sending formatted HTML email...");
+
+        var toList = AppSettingsHelper.Get("EmailTO")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(e => e.Trim());
 
-      var ccList = AppSettingsHelper.Get("EmailCC")
-                      ?.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                      .Select(e => e.Trim());
+        var ccList = AppSettingsHelper.Get("EmailCC")
+                        ?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(e => e.Trim());
 
+        await SendEmailAsync(toList, emailSubject, emailBody, isHtml: true, ccList);
 
-      await SendEmailAsync( toList, emailSubject, emailBody, isHtml: true, ccList );
+        _mainForm.HideLoader();
 
-
-      _mainForm.Log("✅ Email sent successfully.");
+        _mainForm.Log("✅ Email sent successfully.");
     }
 
 
