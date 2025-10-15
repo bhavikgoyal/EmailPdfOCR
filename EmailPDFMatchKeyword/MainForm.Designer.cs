@@ -34,6 +34,7 @@ using Tesseract;
 using static System.Runtime.InteropServices.JavaScript.JSType;
 using Color = System.Drawing.Color;
 using Font = System.Drawing.Font;
+using Label = System.Windows.Forms.Label;
 using LicenseContext = System.ComponentModel.LicenseContext;
 using Timer = System.Windows.Forms.Timer;
 
@@ -47,11 +48,13 @@ namespace EmailPDFMatchKeyword
     private TextBox txtResults;  // class-level variable
     private System.Windows.Forms.Timer pollTimer;
     private SheetsService _sheetsService;
-    private string _spreadsheetId = "1lKR1OdF3Dw7E925EKyy9t2ZyAI8kBks8vylBmkd8mOQ";  // put your real ID here
+    private string _spreadsheetId = AppSettingsHelper.Get("GoogleDrive:SpreadsheetId");
     private CancellationTokenSource cancellationTokenSource;
     private GoogleSheetHelper _sheetHelper;
     public SheetsService SheetsService => _sheetsService;
     public GmailService Service => service;
+    Label lblLoading;
+    ProgressBar progressBar;
 
 
     //private ExtractMethod _ExtractMethod;
@@ -118,6 +121,29 @@ namespace EmailPDFMatchKeyword
       //chkSearchPdfText.CheckedChanged += (s, e) => searchPdf = chkSearchPdfText.Checked;
       //Controls.Add(chkSearchPdfText);
 
+      // Loader label
+      lblLoading = new Label
+      {
+        Text = "Processing...",
+        Left = 320,
+        Top = 14,
+        AutoSize = true,
+        ForeColor = Color.DarkRed,
+        Visible = false
+      };
+      Controls.Add(lblLoading);
+
+      // Optional: Progress bar
+      progressBar = new ProgressBar
+      {
+        Left = 420,
+        Top = 12,
+        Width = 200,
+        Style = ProgressBarStyle.Marquee,
+        Visible = false
+      };
+      Controls.Add(progressBar);
+
       // Larger results box
       txtResults = new TextBox
       {
@@ -169,30 +195,48 @@ namespace EmailPDFMatchKeyword
 
     public void StartPolling()
     {
-      if (cancellationTokenSource != null)
+      try
       {
-        // If polling is already started, don't start again
-        Log("Polling is already running.");
-        return;
+        ShowLoader();
+        if (cancellationTokenSource != null)
+        {
+          // If polling is already started, don't start again
+          Log("Polling is already running.");
+          return;
+        }
+
+        // Create a new CancellationTokenSource to manage the cancellation
+        cancellationTokenSource = new CancellationTokenSource();
+        var token = cancellationTokenSource.Token;
+
+        if (pollTimer == null)
+        {
+            pollTimer = new Timer();
+            // Read interval from appsettings.json
+            string intervalStr = AppSettingsHelper.Get("PollingIntervalMinutes");
+            if (!int.TryParse(intervalStr, out int intervalMinutes))
+            {
+                intervalMinutes = 10; // default to 10 if parsing fails
+            }
+            pollTimer.Interval = intervalMinutes * 60 * 1000; // 5 minutes in milliseconds
+            pollTimer.Tick += async (s, e) => await PollMailboxAsync(token);
+        }
+
+        // Run once immediately
+        _ = PollMailboxAsync(token);
+
+        pollTimer.Start();
+
+        Log("Started polling: first check immediately, then every 5 minutes...");
       }
-
-      // Create a new CancellationTokenSource to manage the cancellation
-      cancellationTokenSource = new CancellationTokenSource();
-      var token = cancellationTokenSource.Token;
-
-      if (pollTimer == null)
+      catch (Exception ex)
       {
-        pollTimer = new Timer();
-        pollTimer.Interval = 500 * 60 * 1000; // 5 minutes in milliseconds
-        pollTimer.Tick += async (s, e) => await PollMailboxAsync(token);
+        Log($"Unexpected error: {ex.Message}");
       }
-
-      // Run once immediately
-      _ = PollMailboxAsync(token);
-
-      pollTimer.Start();
-
-      Log("Started polling: first check immediately, then every 5 minutes...");
+      finally
+      {
+        HideLoader();
+      }
     }
     public void StopPolling()
     {
@@ -213,7 +257,6 @@ namespace EmailPDFMatchKeyword
       cancellationTokenSource = null;
     }
 
-
     public async Task PollMailboxAsync(CancellationToken cancellationToken)
 		{
 			if (service == null)
@@ -225,26 +268,54 @@ namespace EmailPDFMatchKeyword
 
       try
       {
+        var labelsResponse = await service.Users.Labels.Get("me", "INBOX").ExecuteAsync(cancellationToken);
+        int labelUnread = labelsResponse.MessagesUnread ?? 0;
+        Log($"📬 Gmail label unread (INBOX): {labelUnread}");
 
-        var request = service.Users.Messages.List("me");
-				request.LabelIds = "INBOX";
-				request.Q = "is:unread";
+        if (labelUnread == 0)
+        {
+          Log("✅ No new messages in INBOX.");
+          return;
+        }
 
-				var response = await request.ExecuteAsync();
+        // --- Use THREADS list instead of MESSAGES list ---
+        var request = service.Users.Threads.List("me");
+        request.Q = "in:inbox is:unread";
 
-				if (response.Messages == null || response.Messages.Count == 0)
-				{
-					Log("No new messages found.");
-					return;
-				}
+        var allThreads = new List<Google.Apis.Gmail.v1.Data.Thread>();
+        string pageToken = null;
 
-        Log($"Found {response.Messages.Count} new messages.");
-        var fifoMessages = response.Messages.AsEnumerable().Reverse().ToList();
+        do
+        {
+          if (cancellationToken.IsCancellationRequested)
+            cancellationToken.ThrowIfCancellationRequested();
+
+          request.PageToken = pageToken;
+          var response = await request.ExecuteAsync(cancellationToken);
+
+          if (response?.Threads != null && response.Threads.Count > 0)
+            allThreads.AddRange(response.Threads);
+
+          pageToken = response?.NextPageToken;
+        }
+        while (!string.IsNullOrEmpty(pageToken));
+
+        if (allThreads.Count == 0)
+        {
+          Log("No new unread threads found.");
+          return;
+        }
+
+        // Gmail API returns newest first
+        var fifoMessages = allThreads.AsEnumerable().Reverse().ToList();
+
+        Log($"📨 Loaded {fifoMessages.Count} unread threads for processing.");
 
         foreach (var msgItem in fifoMessages)
         {
           try
           {
+            ShowLoader();
             var message = await service.Users.Messages.Get("me", msgItem.Id).ExecuteAsync();
             Log($"Processing message: {message.Snippet}");
 
@@ -277,17 +348,19 @@ namespace EmailPDFMatchKeyword
                 if (Path.GetExtension(tempFilePath).Equals(".pdf", StringComparison.OrdinalIgnoreCase) &&
                     Path.GetFileName(tempFilePath).ToLower().Contains("bill"))
                 {
+                  ShowLoader();
                   Log("Bill to Peer PDF detected. Converting to images...");
                   hasBillPdf = true;
 
                   using (var pdfStream = new FileStream(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                   {
                     Log($"this is the pdf stream from File: {pdfStream}");
-                    var images = _ExtractMethod.ConvertPdfToImages_2(pdfStream);
+                    var images = await _ExtractMethod.ConvertPdfToImages_2Async(pdfStream);
+                    //var images = _ExtractMethod.ConvertPdfToImages_2(pdfStream);
                     Log($"Extract Images from PDF to Images: {images.Count}");
 
                     int retryCount = 2;   // how many times to retry full scan
-                    int delayMs = 3000;   // wait time between retries (1 seconds)
+                    int delayMs = 1000;   // wait time between retries (1 seconds)
 
                     for (int attempt = 1; attempt <= retryCount; attempt++)
                     {
@@ -299,7 +372,8 @@ namespace EmailPDFMatchKeyword
                         if (pageIndex == 1) // PageIndex == 1 is the second page
                         {
                           var image = images[pageIndex];
-                          var rows = _ExtractMethod.ExtractTableRowsFromImage(image);
+                          //var rows = _ExtractMethod.ExtractTableRowsFromImage(image);
+                          var rows = await _ExtractMethod.ExtractTableRowsFromImageAsync(image);
 
                           if (billCharges == "Not Found")
                             billCharges = _ExtractMethod.ExtractCharges(rows);
@@ -333,21 +407,25 @@ namespace EmailPDFMatchKeyword
                       Log("❌ Could not find Bill Charges and/or Bill Date after all retries.");
                     }
                   }
+                  HideLoader();
                 }
 
                 // Handle GEICOPEER PDF
                 if (Path.GetFileName(tempFilePath).Equals("Geicopeer.pdf", StringComparison.OrdinalIgnoreCase))
                 {
+                  ShowLoader();
                   Log("Geicopeer PDF detected. Converting to images...");
                   hasGeicopeerPdf = true;
                   //using (var pdfStream = File.OpenRead(tempFilePath))
                   using (var pdfStream = new FileStream(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                   {
-                    var images = _ExtractMethod.ConvertPdfToImages(pdfStream);
+                    var images = await _ExtractMethod.ConvertPdfToImagesAsync(pdfStream);
+                    //var images = _ExtractMethod.ConvertPdfToImages(pdfStream);
 
                     foreach (var image in images)
                     {
-                      var rows = _ExtractMethod.ExtractTableRowsFromImage(image);
+                      //var rows = _ExtractMethod.ExtractTableRowsFromImage(image);
+                      var rows = await _ExtractMethod.ExtractTableRowsFromImageAsync(image);
 
                       var (_,date, charges) = _ExtractMethod.ExtractFromGeicoPeer(rows);
 
@@ -457,12 +535,7 @@ namespace EmailPDFMatchKeyword
                           PROVIDER = extractedName;
                         }
                       }
-                      else
-                      {
-                        Log("❌ Dr. Name [PROVIDER] is not found in Email Body and Geicopeer Pdf also.");
-                        return ;
-                      }
-
+                      
                       try
                       {
                         SCRIBETEAM = _ExtractMethod.GetFolderPrefixFromDrive(Driveservices, PROVIDER);
@@ -475,24 +548,30 @@ namespace EmailPDFMatchKeyword
 
                       if (geicoDate != "Not Found" && geicoCharges != "Not Found" && caseNumber != "Not Found" && CLAIMANTNAME != "Not Found" && PROVIDER != "Not Found" && INCIDENTDATE != "Not Found" && SCRIBETEAM != "Not Found")
                       {
+                        HideLoader();
                         Log("✅ Successfully extracted all required data from Geicopeer PDF.");
                         break; // ✅ This only breaks the *page loop*, not the attachments loop
                       }
                     }
                   }
+                  HideLoader();
+
                 }
 
                 // Handle MedsToDoc PDFs
                 if (Path.GetFileName(tempFilePath).Replace("_", "").Replace(" ", "").ToLower().Contains("medstodoc") &&
     Path.GetExtension(tempFilePath).Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
+                  ShowLoader();
                   Log("MedsToDoc PDF detected. Counting pages...");
                   try
                   {
                     using (var pdfStream = new FileStream(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                     {
+                      ShowLoader();
                       medsToDocPageCount = _ExtractMethod.GetPdfPageCount_iTextSharp(pdfStream); // use PdfSharp version
                       Log($"MedsToDoc page count: {medsToDocPageCount}");
+                      HideLoader();
                     }
                   }
                   catch (Exception ex)
@@ -500,12 +579,14 @@ namespace EmailPDFMatchKeyword
                     Log($"Failed to count pages for {tempFilePath}: {ex.Message}");
                     medsToDocPageCount = 0;
                   }
+                  HideLoader();
                 }
               }
             }
 
             if (!string.IsNullOrEmpty(PROVIDER) || PROVIDER != "Not Found")
             {
+              ShowLoader();
               // Final Comparison
               string cleanBillCharges = NormalizeAmount(billCharges);
               string cleanGeicoCharges = NormalizeAmount(geicoCharges);
@@ -651,45 +732,16 @@ namespace EmailPDFMatchKeyword
             Log("Polling canceled. Stopping email processing.");
             break;
           }
+          HideLoader();
         }
         Log("Mailbox polling completed.");
-			}
+        HideLoader();
+      }
 			catch (Exception ex)
 			{
 				Log($"Error checking mailbox: {ex.Message}");
 			}
 		}
-
-
-    //public string ExtractDateOfService(List<List<string>> rows)
-    //{
-    //  for (int i = 0; i < rows.Count; i++)
-    //  {
-    //    string rowText = string.Join(" ", rows[i]).ToLower();
-
-    //    // Look for header that contains "date of place of service"
-    //    if (rowText.Contains("date") && rowText.Contains("service"))
-    //    {
-    //      string candidateRow = "";
-
-    //      if (i + 2 < rows.Count && string.Join(" ", rows[i + 1]).ToLower().Contains("service including"))
-    //      {
-    //        candidateRow = string.Join(" ", rows[i + 2]).Trim();
-    //      }
-    //      else if (i + 1 < rows.Count)
-    //      {
-    //        candidateRow = string.Join(" ", rows[i + 1]).Trim();
-    //      }
-
-    //      var match = Regex.Match(candidateRow, @"\b\d{2}/\d{2}/\d{4}\b");
-    //      if (match.Success)
-    //        return match.Value;
-    //    }
-    //  }
-    //  return "Not Found";
-    //}
-
-
 
 
     public void CopyTemplateSheet(string filePath, string newSheetName)
@@ -723,140 +775,6 @@ namespace EmailPDFMatchKeyword
       }
     }
 
-
-
-    //public List<List<string>> ExtractTableRowsFromImage(Bitmap image)
-    //{
-    //  var tableRows = new List<List<string>>();
-
-    //  using (var engine = new TesseractEngine(@"./tessdata", "eng", EngineMode.Default))
-    //  {
-    //    using (var ms = new MemoryStream())
-    //    {
-    //      image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-    //      ms.Position = 0;
-
-    //      using (var pix = Pix.LoadFromMemory(ms.ToArray()))
-    //      using (var page = engine.Process(pix))
-    //      {
-    //        var tsv = page.GetTsvText(0);
-    //        var lines = tsv.Split('\n');
-
-    //        int currentLineNum = -1;
-    //        List<string> row = null;
-
-    //        foreach (var line in lines.Skip(1)) 
-    //        {
-    //          var cols = line.Split('\t');
-    //          if (cols.Length < 12) continue;
-
-    //          int lineNum;
-    //          if (!int.TryParse(cols[4], out lineNum)) continue;
-
-    //          string word = cols[11].Trim();
-
-    //          if (lineNum != currentLineNum)
-    //          {
-    //            if (row != null) tableRows.Add(row);
-    //            row = new List<string>();
-    //            currentLineNum = lineNum;
-    //          }
-    //          if (!string.IsNullOrEmpty(word))
-    //            row.Add(word);
-    //        }
-    //        if (row != null) tableRows.Add(row);
-    //      }
-    //    }
-    //  }
-    //  return tableRows;
-    //}
-
-    //public string FindKeywordValueInSection(List<List<string>> rows, string sectionHeader, string keyword)
-    //{
-    //  keyword = keyword.ToLower();
-    //  sectionHeader = sectionHeader.ToLower();
-
-    //  bool insideSection = false;
-
-    //  for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
-    //  {
-    //    string rowText = string.Join(" ", rows[rowIndex]).ToLower();
-
-    //    if (rowText.Contains(sectionHeader))
-    //    {
-    //      insideSection = true;
-    //      continue; 
-    //    }
-
-    //    if (insideSection &&
-    //       (rowText.Contains("treating") || rowText.Contains("different") || rowText.Contains("provider")))
-    //    {
-    //      break;
-    //    }
-
-    //    if (insideSection && rowText.Contains(keyword))
-    //    {
-    //      if (rowIndex + 2 < rows.Count && string.Join(" ", rows[rowIndex + 1]).ToLower().Contains("service including zip code"))
-    //      {
-    //        string actualRow = string.Join(" ", rows[rowIndex + 2]).Trim();
-    //        if (!string.IsNullOrEmpty(actualRow))
-    //          return actualRow;
-    //      }
-
-    //      if (rowIndex + 1 < rows.Count)
-    //      {
-    //        string nextRow = string.Join(" ", rows[rowIndex + 1]).Trim();
-    //        if (!string.IsNullOrEmpty(nextRow))
-    //          return nextRow;
-    //      }
-    //    }
-    //  }
-    //  return "Not Found";
-    //}
-
-    //public string FindKeywordValue(List<List<string>> rows, string keyword)
-    //{
-    //  keyword = keyword.ToLower();
-
-    //  foreach (var row in rows)
-    //  {
-    //    // Join row words into single string to handle multi-word keywords
-    //    string rowText = string.Join(" ", row).ToLower();
-
-    //    if (rowText.Contains(keyword))
-    //    {
-    //      // Take words after keyword as value
-    //      var words = rowText.Split(' ');
-    //      int keywordIndex = -1;
-
-    //      // Find index of first word of keyword
-    //      var keywordParts = keyword.Split(' ');
-    //      for (int i = 0; i < words.Length - keywordParts.Length + 1; i++)
-    //      {
-    //        bool match = true;
-    //        for (int j = 0; j < keywordParts.Length; j++)
-    //        {
-    //          if (words[i + j] != keywordParts[j])
-    //          {
-    //            match = false;
-    //            break;
-    //          }
-    //        }
-    //        if (match)
-    //        {
-    //          keywordIndex = i + keywordParts.Length;
-    //          break;
-    //        }
-    //      }
-    //      if (keywordIndex >= 0 && keywordIndex < words.Length)
-    //      {
-    //        // Return remaining words in row as value
-    //        return string.Join(" ", words.Skip(keywordIndex)).Trim();
-    //      }
-    //    }
-    //  }
-    //  return "Not Found";
-    //}
 
     public void Log(string message)
 		{
@@ -910,6 +828,22 @@ namespace EmailPDFMatchKeyword
       // Return cleaned input if parsing fails
       return cleanInput;
     }
+
+
+    public void ShowLoader()
+    {
+      lblLoading.Visible = true;
+      progressBar.Visible = true;
+      progressBar.MarqueeAnimationSpeed = 30;
+    }
+
+    public void HideLoader()
+    {
+      lblLoading.Visible = false;
+      progressBar.Visible = false;
+      progressBar.MarqueeAnimationSpeed = 0;
+    }
+
 
 
   }
