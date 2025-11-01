@@ -19,19 +19,919 @@
 
   <ItemGroup>
     <None Remove="credentials.json" />
+    <None Remove="ghostscript\bin\acctest.ps" />
+    <None Remove="ghostscript\bin\afmdiff.awk" />
+    <None Remove="ghostscript\bin\align.ps" />
+    <None Remove="ghostscript\bin\bj8.rpd" />
+    <None Remove="ghostscript\bin\bj8gc12f.upp" />
+    <None Remove="ghostscript\bin\bj8hg12f.upp" />
+    <None Remove="ghostscript\bin\bj8oh06n.upp" />
+    <None Remove="ghostscript\bin\bj8pa06n.upp" />
+    <None Remove="ghostscript\bin\bj8pp12f.upp" />
+    <None Remove="ghostscript\bin\bj8ts06n.upp" />
+    <None Remove="ghostscript\bin\bjc610a0.upp" />
+    <None Remove="ghostscript\bin\bjc610a1.upp" />
+    <None Remove="ghostscript\bin\bjc610a2.upp" />
+    <None Remove="ghostscript\bin\bjc610a3.upp" />
+    <None Remove="ghostscript\bin\bjc610a4.upp" />
+    <None Remove="ghostscript\bin\bjc610a5.upp" />
+    <None Remove="ghostscript\bin\bjc610a6.upp" />
+    <None Remove="ghostscript\bin\bjc610a7.upp" />
+    <None Remove="ghostscript\bin\bjc610a8.upp" />
+    <None Remove="ghostscript\bin\bjc610b1.upp" />
+    <None Remove="ghostscript\bin\bjc610b2.upp" />
+    <None Remove="ghostscript\bin\bjc610b3.upp" />
+    <None Remove="ghostscript\bin\bjc610b4.upp" />
+    <None Remove="ghostscript\bin\bjc610b6.upp" />
+    <None Remove="ghostscript\bin\bjc610b7.upp" />
+    <None Remove="ghostscript\bin\bjc610b8.upp" />
+    <None Remove="ghostscript\bin\caption.ps" />
+    <None Remove="ghostscript\bin\cat.ps" />
+    <None Remove="ghostscript\bin\cbjc600.ppd" />
+    <None Remove="ghostscript\bin\cbjc800.ppd" />
+    <None Remove="ghostscript\bin\cdj550.upp" />
+    <None Remove="ghostscript\bin\cdj690.upp" />
+    <None Remove="ghostscript\bin\cdj690ec.upp" />
+    <None Remove="ghostscript\bin\cid2code.ps" />
+    <None Remove="ghostscript\bin\cidfmap" />
+    <None Remove="ghostscript\bin\dnj750c.upp" />
+    <None Remove="ghostscript\bin\dnj750m.upp" />
+    <None Remove="ghostscript\bin\docie.ps" />
+    <None Remove="ghostscript\bin\dvipdf" />
+    <None Remove="ghostscript\bin\eps2eps" />
+    <None Remove="ghostscript\bin\eps2eps.bat" />
+    <None Remove="ghostscript\bin\eps2eps.cmd" />
+    <None Remove="ghostscript\bin\FAPIconfig-FCO" />
+    <None Remove="ghostscript\bin\FCOfontmap-PCLPS3" />
+    <None Remove="ghostscript\bin\FCOfontmap-PS3" />
+    <None Remove="ghostscript\bin\font2pcl.ps" />
+    <None Remove="ghostscript\bin\Fontmap.ATB" />
+    <None Remove="ghostscript\bin\Fontmap.ATM" />
+    <None Remove="ghostscript\bin\Fontmap.OS2" />
+    <None Remove="ghostscript\bin\Fontmap.OSF" />
+    <None Remove="ghostscript\bin\Fontmap.SGI" />
+    <None Remove="ghostscript\bin\Fontmap.Sol" />
+    <None Remove="ghostscript\bin\Fontmap.Ult" />
+    <None Remove="ghostscript\bin\Fontmap.VMS" />
+    <None Remove="ghostscript\bin\ghostpdf.cat" />
+    <None Remove="ghostscript\bin\ghostpdf.inf" />
+    <None Remove="ghostscript\bin\ghostpdf.ppd" />
+    <None Remove="ghostscript\bin\ghostpdf.README" />
+    <None Remove="ghostscript\bin\gsbj" />
+    <None Remove="ghostscript\bin\gsbj.bat" />
+    <None Remove="ghostscript\bin\gsdj" />
+    <None Remove="ghostscript\bin\gsdj.bat" />
+    <None Remove="ghostscript\bin\gsdj500" />
+    <None Remove="ghostscript\bin\gsdj500.bat" />
+    <None Remove="ghostscript\bin\gsdll64.dll" />
+    <None Remove="ghostscript\bin\gsdll64.lib" />
+    <None Remove="ghostscript\bin\gslj" />
+    <None Remove="ghostscript\bin\gslj.bat" />
+    <None Remove="ghostscript\bin\gslp" />
+    <None Remove="ghostscript\bin\gslp.bat" />
+    <None Remove="ghostscript\bin\gslp.ps" />
+    <None Remove="ghostscript\bin\gsnd" />
+    <None Remove="ghostscript\bin\gsnd.bat" />
+    <None Remove="ghostscript\bin\gsndt.bat" />
+    <None Remove="ghostscript\bin\gsnup.ps" />
+    <None Remove="ghostscript\bin\gssetgs.bat" />
+    <None Remove="ghostscript\bin\gssetgs32.bat" />
+    <None Remove="ghostscript\bin\gssetgs64.bat" />
+    <None Remove="ghostscript\bin\gst.bat" />
+    <None Remove="ghostscript\bin\gstt.bat" />
+    <None Remove="ghostscript\bin\gswin64.exe" />
+    <None Remove="ghostscript\bin\gswin64c.exe" />
+    <None Remove="ghostscript\bin\gs_ce_e.ps" />
+    <None Remove="ghostscript\bin\gs_css_e.ps" />
+    <None Remove="ghostscript\bin\gs_il2_e.ps" />
+    <None Remove="ghostscript\bin\gs_kanji.ps" />
+    <None Remove="ghostscript\bin\gs_ksb_e.ps" />
+    <None Remove="ghostscript\bin\gs_l.xbm" />
+    <None Remove="ghostscript\bin\gs_l.xpm" />
+    <None Remove="ghostscript\bin\gs_lgo_e.ps" />
+    <None Remove="ghostscript\bin\gs_lgx_e.ps" />
+    <None Remove="ghostscript\bin\gs_l_m.xbm" />
+    <None Remove="ghostscript\bin\gs_m.xbm" />
+    <None Remove="ghostscript\bin\gs_m.xpm" />
+    <None Remove="ghostscript\bin\gs_m_m.xbm" />
+    <None Remove="ghostscript\bin\gs_s.xbm" />
+    <None Remove="ghostscript\bin\gs_s.xpm" />
+    <None Remove="ghostscript\bin\gs_s_m.xbm" />
+    <None Remove="ghostscript\bin\gs_t.xbm" />
+    <None Remove="ghostscript\bin\gs_t.xpm" />
+    <None Remove="ghostscript\bin\gs_t_m.xbm" />
+    <None Remove="ghostscript\bin\gs_wl1_e.ps" />
+    <None Remove="ghostscript\bin\gs_wl2_e.ps" />
+    <None Remove="ghostscript\bin\gs_wl5_e.ps" />
+    <None Remove="ghostscript\bin\ht_ccsto.ps" />
+    <None Remove="ghostscript\bin\image-qa.ps" />
+    <None Remove="ghostscript\bin\Info-macos.plist" />
+    <None Remove="ghostscript\bin\jispaper.ps" />
+    <None Remove="ghostscript\bin\jobseparator.ps" />
+    <None Remove="ghostscript\bin\landscap.ps" />
+    <None Remove="ghostscript\bin\lines.ps" />
+    <None Remove="ghostscript\bin\lp386.bat" />
+    <None Remove="ghostscript\bin\lp386r2.bat" />
+    <None Remove="ghostscript\bin\lpgs.bat" />
+    <None Remove="ghostscript\bin\lpr2.bat" />
+    <None Remove="ghostscript\bin\lprsetup.sh" />
+    <None Remove="ghostscript\bin\mkcidfm.ps" />
+    <None Remove="ghostscript\bin\necp2x.upp" />
+    <None Remove="ghostscript\bin\necp2x6.upp" />
+    <None Remove="ghostscript\bin\pdf2dsc" />
+    <None Remove="ghostscript\bin\pdf2dsc.bat" />
+    <None Remove="ghostscript\bin\pdf2dsc.ps" />
+    <None Remove="ghostscript\bin\pdf2ps" />
+    <None Remove="ghostscript\bin\pdf2ps.bat" />
+    <None Remove="ghostscript\bin\pdf2ps.cmd" />
+    <None Remove="ghostscript\bin\PDFA_def.ps" />
+    <None Remove="ghostscript\bin\PDFX_def.ps" />
+    <None Remove="ghostscript\bin\pdf_info.ps" />
+    <None Remove="ghostscript\bin\pf2afm" />
+    <None Remove="ghostscript\bin\pf2afm.bat" />
+    <None Remove="ghostscript\bin\pf2afm.cmd" />
+    <None Remove="ghostscript\bin\pf2afm.ps" />
+    <None Remove="ghostscript\bin\pfbtopfa" />
+    <None Remove="ghostscript\bin\pfbtopfa.bat" />
+    <None Remove="ghostscript\bin\pfbtopfa.ps" />
+    <None Remove="ghostscript\bin\ppath.ps" />
+    <None Remove="ghostscript\bin\pphs" />
+    <None Remove="ghostscript\bin\pphs.ps" />
+    <None Remove="ghostscript\bin\prfont.ps" />
+    <None Remove="ghostscript\bin\printafm" />
+    <None Remove="ghostscript\bin\printafm.ps" />
+    <None Remove="ghostscript\bin\ps2ai.ps" />
+    <None Remove="ghostscript\bin\ps2ascii" />
+    <None Remove="ghostscript\bin\ps2ascii.bat" />
+    <None Remove="ghostscript\bin\ps2ascii.cmd" />
+    <None Remove="ghostscript\bin\ps2epsi" />
+    <None Remove="ghostscript\bin\ps2epsi.bat" />
+    <None Remove="ghostscript\bin\ps2epsi.cmd" />
+    <None Remove="ghostscript\bin\ps2epsi.ps" />
+    <None Remove="ghostscript\bin\ps2pdf" />
+    <None Remove="ghostscript\bin\ps2pdf.bat" />
+    <None Remove="ghostscript\bin\ps2pdf.cmd" />
+    <None Remove="ghostscript\bin\ps2pdf12" />
+    <None Remove="ghostscript\bin\ps2pdf12.bat" />
+    <None Remove="ghostscript\bin\ps2pdf12.cmd" />
+    <None Remove="ghostscript\bin\ps2pdf13" />
+    <None Remove="ghostscript\bin\ps2pdf13.bat" />
+    <None Remove="ghostscript\bin\ps2pdf13.cmd" />
+    <None Remove="ghostscript\bin\ps2pdf14" />
+    <None Remove="ghostscript\bin\ps2pdf14.bat" />
+    <None Remove="ghostscript\bin\ps2pdf14.cmd" />
+    <None Remove="ghostscript\bin\ps2pdfwr" />
+    <None Remove="ghostscript\bin\ps2pdfxx.bat" />
+    <None Remove="ghostscript\bin\ps2ps" />
+    <None Remove="ghostscript\bin\ps2ps.bat" />
+    <None Remove="ghostscript\bin\ps2ps.cmd" />
+    <None Remove="ghostscript\bin\ps2ps2" />
+    <None Remove="ghostscript\bin\ps2ps2.bat" />
+    <None Remove="ghostscript\bin\ps2ps2.cmd" />
+    <None Remove="ghostscript\bin\ras1.upp" />
+    <None Remove="ghostscript\bin\ras24.upp" />
+    <None Remove="ghostscript\bin\ras3.upp" />
+    <None Remove="ghostscript\bin\ras32.upp" />
+    <None Remove="ghostscript\bin\ras4.upp" />
+    <None Remove="ghostscript\bin\ras8m.upp" />
+    <None Remove="ghostscript\bin\rinkj-2200-setup" />
+    <None Remove="ghostscript\bin\rollconv.ps" />
+    <None Remove="ghostscript\bin\st640ih.upp" />
+    <None Remove="ghostscript\bin\st640ihg.upp" />
+    <None Remove="ghostscript\bin\st640p.upp" />
+    <None Remove="ghostscript\bin\st640pg.upp" />
+    <None Remove="ghostscript\bin\st640pl.upp" />
+    <None Remove="ghostscript\bin\st640plg.upp" />
+    <None Remove="ghostscript\bin\stc.upp" />
+    <None Remove="ghostscript\bin\stc1520h.upp" />
+    <None Remove="ghostscript\bin\stc2.upp" />
+    <None Remove="ghostscript\bin\stc200_h.upp" />
+    <None Remove="ghostscript\bin\stc2s_h.upp" />
+    <None Remove="ghostscript\bin\stc2_h.upp" />
+    <None Remove="ghostscript\bin\stc300.upp" />
+    <None Remove="ghostscript\bin\stc300bl.upp" />
+    <None Remove="ghostscript\bin\stc300bm.upp" />
+    <None Remove="ghostscript\bin\stc500p.upp" />
+    <None Remove="ghostscript\bin\stc500ph.upp" />
+    <None Remove="ghostscript\bin\stc600ih.upp" />
+    <None Remove="ghostscript\bin\stc600p.upp" />
+    <None Remove="ghostscript\bin\stc600pl.upp" />
+    <None Remove="ghostscript\bin\stc640p.upp" />
+    <None Remove="ghostscript\bin\stc800ih.upp" />
+    <None Remove="ghostscript\bin\stc800p.upp" />
+    <None Remove="ghostscript\bin\stc800pl.upp" />
+    <None Remove="ghostscript\bin\stcany.upp" />
+    <None Remove="ghostscript\bin\stcany_h.upp" />
+    <None Remove="ghostscript\bin\stcinfo.ps" />
+    <None Remove="ghostscript\bin\stcolor.ps" />
+    <None Remove="ghostscript\bin\stc_h.upp" />
+    <None Remove="ghostscript\bin\stc_l.upp" />
+    <None Remove="ghostscript\bin\stocht.ps" />
+    <None Remove="ghostscript\bin\traceimg.ps" />
+    <None Remove="ghostscript\bin\traceop.ps" />
+    <None Remove="ghostscript\bin\uninfo.ps" />
+    <None Remove="ghostscript\bin\unix-lpr.sh" />
+    <None Remove="ghostscript\bin\viewcmyk.ps" />
+    <None Remove="ghostscript\bin\viewgif.ps" />
+    <None Remove="ghostscript\bin\viewjpeg.ps" />
+    <None Remove="ghostscript\bin\viewmiff.ps" />
+    <None Remove="ghostscript\bin\viewpbm.ps" />
+    <None Remove="ghostscript\bin\viewpcx.ps" />
+    <None Remove="ghostscript\bin\viewps2a.ps" />
+    <None Remove="ghostscript\bin\viewraw.ps" />
+    <None Remove="ghostscript\bin\viewrgb.ps" />
+    <None Remove="ghostscript\bin\winmaps.ps" />
+    <None Remove="ghostscript\bin\wmakebat.bat" />
+    <None Remove="ghostscript\bin\zeroline.ps" />
+    <None Remove="ghostscript\bin\zugferd.ps" />
   </ItemGroup>
 
   <ItemGroup>
     <Content Include="credentials.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="ghostscript\bin\acctest.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\afmdiff.awk">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\align.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bj8.rpd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bj8gc12f.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bj8hg12f.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bj8oh06n.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bj8pa06n.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bj8pp12f.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bj8ts06n.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610a0.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610a1.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610a2.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610a3.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610a4.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610a5.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610a6.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610a7.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610a8.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610b1.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610b2.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610b3.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610b4.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610b6.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610b7.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\bjc610b8.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\caption.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\cat.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\cbjc600.ppd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\cbjc800.ppd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\cdj550.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\cdj690.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\cdj690ec.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\cid2code.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\cidfmap">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\dnj750c.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\dnj750m.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\docie.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\dvipdf">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\eps2eps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\eps2eps.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\eps2eps.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\FAPIconfig-FCO">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\FCOfontmap-PCLPS3">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\FCOfontmap-PS3">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\font2pcl.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\Fontmap.ATB">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\Fontmap.ATM">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\Fontmap.OS2">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\Fontmap.OSF">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\Fontmap.SGI">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\Fontmap.Sol">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\Fontmap.Ult">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\Fontmap.VMS">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ghostpdf.cat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ghostpdf.inf">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ghostpdf.ppd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ghostpdf.README">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsbj">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsbj.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsdj">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsdj.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsdj500">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsdj500.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsdll64.dll">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsdll64.lib">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gslj">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gslj.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gslp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gslp.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gslp.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsnd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsnd.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsndt.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gsnup.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gssetgs.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gssetgs32.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gssetgs64.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gst.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gstt.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gswin64.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gswin64c.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_ce_e.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_css_e.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_il2_e.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_kanji.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_ksb_e.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_l.xbm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_l.xpm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_lgo_e.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_lgx_e.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_l_m.xbm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_m.xbm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_m.xpm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_m_m.xbm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_s.xbm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_s.xpm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_s_m.xbm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_t.xbm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_t.xpm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_t_m.xbm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_wl1_e.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_wl2_e.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\gs_wl5_e.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ht_ccsto.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\image-qa.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\Info-macos.plist">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\jispaper.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\jobseparator.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\landscap.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\lines.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\lp386.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\lp386r2.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\lpgs.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\lpr2.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\lprsetup.sh">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\mkcidfm.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\necp2x.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\necp2x6.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pdf2dsc">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pdf2dsc.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pdf2dsc.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pdf2ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pdf2ps.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pdf2ps.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\PDFA_def.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\PDFX_def.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pdf_info.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pf2afm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pf2afm.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pf2afm.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pf2afm.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pfbtopfa">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pfbtopfa.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pfbtopfa.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ppath.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pphs">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\pphs.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\prfont.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\printafm">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\printafm.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2ai.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2ascii">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2ascii.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2ascii.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2epsi">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2epsi.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2epsi.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2epsi.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf12">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf12.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf12.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf13">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf13.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf13.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf14">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf14.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdf14.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdfwr">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2pdfxx.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2ps.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2ps.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2ps2">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2ps2.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ps2ps2.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ras1.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ras24.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ras3.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ras32.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ras4.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\ras8m.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\rinkj-2200-setup">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\rollconv.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\st640ih.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\st640ihg.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\st640p.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\st640pg.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\st640pl.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\st640plg.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc1520h.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc2.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc200_h.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc2s_h.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc2_h.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc300.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc300bl.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc300bm.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc500p.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc500ph.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc600ih.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc600p.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc600pl.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc640p.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc800ih.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc800p.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc800pl.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stcany.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stcany_h.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stcinfo.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stcolor.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc_h.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stc_l.upp">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\stocht.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\traceimg.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\traceop.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\uninfo.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\unix-lpr.sh">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\viewcmyk.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\viewgif.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\viewjpeg.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\viewmiff.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\viewpbm.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\viewpcx.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\viewps2a.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\viewraw.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\viewrgb.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\winmaps.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\wmakebat.bat">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\zeroline.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ghostscript\bin\zugferd.ps">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="EPPlus" Version="7.1.2" />
-    <PackageReference Include="Google.Apis.Auth" Version="1.71.0" />
-    <PackageReference Include="Google.Apis.Drive.v3" Version="1.71.0.3905" />
+    <PackageReference Include="Google.Apis.Auth" Version="1.72.0" />
+    <PackageReference Include="Google.Apis.Drive.v3" Version="1.72.0.3944" />
     <PackageReference Include="Google.Apis.Gmail.v1" Version="1.70.0.3833" />
     <PackageReference Include="Google.Apis.Oauth2.v2" Version="1.68.0.1869" />
     <PackageReference Include="Google.Apis.Sheets.v4" Version="1.70.0.3819" />
@@ -57,18 +957,6 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Update="ghostscript\align.ps">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="ghostscript\bin\gsdll64.dll">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="ghostscript\bin\gsdll64.lib">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="ghostscript\bin\gswin64.exe">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Update="ghostscript\bin\gswin64c.exe">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Update="ghostscript\bj8.rpd">
