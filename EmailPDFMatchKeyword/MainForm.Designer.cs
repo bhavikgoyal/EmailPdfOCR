@@ -951,37 +951,36 @@ namespace EmailPDFMatchKeyword
                                 result += "Values DO NOT MATCH. Reason: " + mismatchReason;
 
                                 // Prepare the email body
-                                string emailBody = $@"
-                                    <html>
-                                    <body style='font-family:Segoe UI, sans-serif; color:#333;'>
-                                        <p>Hello,</p>
-                                        <p>
-                                            This is to inform you that the email bearing subject :
-                                            <strong>{subject}</strong> 
-                                            doesn't match the required details. Please check the result printed in the system.
-                                        </p>
-                                        <p><strong>Reason:</strong> {mismatchReason}</p>
-                                        <br/>
-                                        <p><strong>Comparison Details:</strong></p>
-                                        <pre>{result}</pre>
-                                        <br/>
-                                        <p>Thanks</p>
-                                    </body>
-                                    </html>";
+                                //string emailBody = $@"
+                                //    <html>
+                                //    <body style='font-family:Segoe UI, sans-serif; color:#333;'>
+                                //        <p>Hello,</p>
+                                //        <p>
+                                //            This is to inform you that the email bearing subject :
+                                //            <strong>{subject}</strong> 
+                                //            doesn't match the required details. Please check the result printed in the system.
+                                //        </p>
+                                //        <p><strong>Reason:</strong> {mismatchReason}</p>
+                                //        <br/>
+                                //        <p><strong>Comparison Details:</strong></p>
+                                //        <pre>{result}</pre>
+                                //        <br/>
+                                //        <p>Thanks</p>
+                                //    </body>
+                                //    </html>";
 
 
-                                //string ToEmail = AppSettingsHelper.Get("CalculateDataEmail");
+                                ////string ToEmail = AppSettingsHelper.Get("CalculateDataEmail");
 
-                                var toList = AppSettingsHelper.Get("EmailTO")
-                                .Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                .Select(e => e.Trim());
+                                //var toList = AppSettingsHelper.Get("EmailTO")
+                                //.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                //.Select(e => e.Trim());
 
-                                var ccList = AppSettingsHelper.Get("EmailCC")
-                                                ?.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                                .Select(e => e.Trim());
+                                //var ccList = AppSettingsHelper.Get("EmailCC")
+                                //                ?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                //                .Select(e => e.Trim());
 
-
-                                await _ExtractMethod.SendEmailAsync(toList, subject: "Required Details are not matched", emailBody, isHtml: true, ccList);
+                                //await _ExtractMethod.SendEmailAsync(toList, subject: "Required Details are not matched", emailBody, isHtml: true, ccList);
                                 Log($"Email {subject} Process will completed............");
 
                                 await _ExtractMethod.MarkMessageAsReadAsync(msgItem.Id);
