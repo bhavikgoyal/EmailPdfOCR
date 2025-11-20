@@ -29,6 +29,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Mail;
 using System.Text;
@@ -65,6 +66,10 @@ namespace EmailPDFMatchKeyword
         public GmailService Service => service;
         Label lblLoading;
         ProgressBar progressBar;
+
+        // New fields for file logging
+        private string _logFilePath;
+        private readonly object _logLock = new object();
 
 
         //private ExtractMethod _ExtractMethod;
@@ -111,6 +116,19 @@ namespace EmailPDFMatchKeyword
         {
             saveFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "InvoiceAttachments");
             Directory.CreateDirectory(saveFolder);
+
+            // Ensure Logs folder exists and create initial log file
+            try
+            {
+                var logsDir = Path.Combine(saveFolder, "Logs");
+                Directory.CreateDirectory(logsDir);
+                _logFilePath = Path.Combine(logsDir, $"Log_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+                File.AppendAllText(_logFilePath, $"Log started at {DateTime.Now:yyyy-MM-dd HH:mm:ss}\r\n");
+            }
+            catch
+            {
+                // ignore logging initialization failures
+            }
 
             // Start button
             Button btnStart = new Button { Text = "Start", Left = 10, Top = 10 };
@@ -166,6 +184,121 @@ namespace EmailPDFMatchKeyword
                 Font = new Font("Segoe UI", 13, FontStyle.Regular)
             };
             Controls.Add(txtResults);
+
+            // Redirect Console/Trace/Debug output to the log file and UI
+            try
+            {
+                SetupLoggingRedirects();
+            }
+            catch
+            {
+                // ignore redirect failures
+            }
+        }
+
+        // Setup console/trace redirection to write into the same log file and UI
+        private void SetupLoggingRedirects()
+        {
+            // Ensure _logFilePath exists
+            if (string.IsNullOrEmpty(_logFilePath))
+            {
+                var logsDir = Path.Combine(saveFolder ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "InvoiceAttachments", "Logs");
+                Directory.CreateDirectory(logsDir);
+                _logFilePath = Path.Combine(logsDir, $"Log_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+                File.AppendAllText(_logFilePath, $"Log started at {DateTime.Now:yyyy-MM-dd HH:mm:ss}\r\n");
+            }
+
+            var writer = new UiAndFileTextWriter(_logFilePath, txtResults, _logLock);
+
+            // Redirect console output
+            Console.SetOut(writer);
+            Console.SetError(writer);
+
+            // Add trace listeners
+            System.Diagnostics.Trace.Listeners.Clear();
+            System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(writer));
+            System.Diagnostics.Trace.AutoFlush = true;
+
+            // Note: Debug.Listeners is not available in this target framework, Trace covers runtime logging.
+        }
+
+        // TextWriter that writes to the UI textbox and to a file (thread-safe)
+        private class UiAndFileTextWriter : TextWriter
+        {
+            private readonly string _filePath;
+            private readonly TextBox _ui;
+            private readonly object _fileLock;
+
+            public UiAndFileTextWriter(string filePath, TextBox ui, object fileLock)
+            {
+                _filePath = filePath;
+                _ui = ui;
+                _fileLock = fileLock ?? new object();
+            }
+
+            public override Encoding Encoding => Encoding.UTF8;
+
+            private void WriteInternal(string value)
+            {
+                if (value == null) return;
+
+                // Ensure every write ends with newline for file clarity
+                if (!value.EndsWith(Environment.NewLine))
+                    value = value + Environment.NewLine;
+
+                string timestamped = $"{DateTime.Now:dd/MM/yyyy HH:mm:ss} - {value}";
+
+                try
+                {
+                    lock (_fileLock)
+                    {
+                        File.AppendAllText(_filePath, timestamped, Encoding.UTF8);
+                    }
+                }
+                catch
+                {
+                    // ignore file write failures
+                }
+
+                try
+                {
+                    if (_ui != null)
+                    {
+                        if (_ui.InvokeRequired)
+                        {
+                            _ui.BeginInvoke(new Action(() => _ui.AppendText(timestamped)));
+                        }
+                        else
+                        {
+                            _ui.AppendText(timestamped);
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore UI failures
+                }
+            }
+
+            public override void Write(char value)
+            {
+                WriteInternal(value.ToString());
+            }
+
+            public override void Write(string value)
+            {
+                WriteInternal(value);
+            }
+
+            public override void WriteLine(string value)
+            {
+                WriteInternal(value + Environment.NewLine);
+            }
+
+            public override void WriteLine()
+            {
+                WriteInternal(Environment.NewLine);
+            }
         }
 
         public async Task AuthenticateUserAsync()
@@ -185,7 +318,38 @@ namespace EmailPDFMatchKeyword
 
                 // ✅ Automatically runs a local web server and handles redirect
                 var app = new AuthorizationCodeInstalledApp(flow, new LocalServerCodeReceiver());
-                var credential = await app.AuthorizeAsync("user", CancellationToken.None);
+
+                ICredential credential = null;
+
+                try
+                {
+                    credential = await app.AuthorizeAsync("user", CancellationToken.None);
+                }
+                catch (TokenResponseException tre) when (tre.Error != null && (tre.Error.Error == "invalid_grant" || (tre.Error.ErrorDescription != null && tre.Error.ErrorDescription.Contains("invalid_grant"))))
+                {
+                    // Refresh token expired or revoked. Delete local token store and retry once.
+                    Log("⚠️ Token refresh failed with invalid_grant. Deleting local token store and retrying authentication...");
+                    try
+                    {
+                        DeleteLocalTokenStore();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"⚠️ Failed to delete token store: {ex.Message}");
+                    }
+
+                    // Recreate the flow & app to ensure clean state
+                    flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
+                    {
+                        ClientSecrets = secrets,
+                        Scopes = new[]
+                        { GmailService.Scope.GmailModify, GmailService.Scope.GmailSend, DriveService.Scope.Drive, SheetsService.Scope.Spreadsheets },
+                        DataStore = new FileDataStore("token.json", true)
+                    });
+
+                    var appRetry = new AuthorizationCodeInstalledApp(flow, new LocalServerCodeReceiver());
+                    credential = await appRetry.AuthorizeAsync("user", CancellationToken.None);
+                }
 
                 // 6️⃣ Initialize Gmail service
                 service = new GmailService(new BaseClientService.Initializer
@@ -210,53 +374,105 @@ namespace EmailPDFMatchKeyword
 
                 _sheetHelper = new GoogleSheetHelper(_sheetsService, _spreadsheetId);
 
-                Console.WriteLine("✅ User authenticated successfully with offline access and consent prompt!");
+                Log("✅ User authenticated successfully with offline access and consent prompt!");
             }
             catch (Exception ex)
             {
+                Log($"❌ Authentication failed: {ex.Message}");
                 Console.WriteLine($"❌ Authentication failed: {ex.Message}");
             }
         }
 
+        private void DeleteLocalTokenStore()
+        {
+            try
+            {
+                // FileDataStore created with folder name "token.json" in app base directory
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var tokenDir = Path.Combine(baseDir, "token.json");
+                if (Directory.Exists(tokenDir))
+                {
+                    Directory.Delete(tokenDir, true);
+                    Log($"Deleted token store at: {tokenDir}");
+                }
 
-    //public async Task AuthenticateUserAsync()
-    //{
-    //    using var stream = new FileStream("credentials.json", FileMode.Open, FileAccess.Read);
-    //    var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
-    //        GoogleClientSecrets.FromStream(stream).Secrets,
-    //        new[] { GmailService.Scope.GmailModify, GmailService.Scope.GmailSend, DriveService.Scope.Drive, SheetsService.Scope.Spreadsheets },
-    //        "user",
-    //        CancellationToken.None,
-    //        new FileDataStore("token.json", true));
+                // Also try current working directory
+                var cwdToken = Path.Combine(Directory.GetCurrentDirectory(), "token.json");
+                if (Directory.Exists(cwdToken) && !string.Equals(cwdToken, tokenDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    Directory.Delete(cwdToken, true);
+                    Log($"Deleted token store at: {cwdToken}");
+                }
 
-    //    service = new GmailService(new BaseClientService.Initializer
-    //    {
-    //        HttpClientInitializer = credential,
-    //        ApplicationName = "Email Attachment Reader"
-    //    });
+                // Some environments store tokens in user profile - try common fallback
+                var userTokenPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".credentials", "token.json");
+                if (Directory.Exists(userTokenPath))
+                {
+                    Directory.Delete(userTokenPath, true);
+                    Log($"Deleted token store at: {userTokenPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                // rethrow to let caller log
+                throw new Exception("Failed to delete token store", ex);
+            }
+        }
 
-    //    Driveservices = new DriveService(new BaseClientService.Initializer()
-    //    {
-    //        HttpClientInitializer = credential,
-    //        ApplicationName = "My Gmail + Drive App",
-    //    });
+        //public async Task AuthenticateUserAsync()
+        //{
+        //    using var stream = new FileStream("credentials.json", FileMode.Open, FileAccess.Read);
+        //    var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+        //        GoogleClientSecrets.FromStream(stream).Secrets,
+        //        new[] { GmailService.Scope.GmailModify, GmailService.Scope.GmailSend, DriveService.Scope.Drive, SheetsService.Scope.Spreadsheets },
+        //        "user",
+        //        CancellationToken.None,
+        //        new FileDataStore("token.json", true));
 
-    //    _sheetsService = new SheetsService(new BaseClientService.Initializer()
-    //    {
-    //        HttpClientInitializer = credential,
-    //        ApplicationName = "Peer List Automation"
-    //    });
+        //    service = new GmailService(new BaseClientService.Initializer
+        //    {
+        //        HttpClientInitializer = credential,
+        //        ApplicationName = "Email Attachment Reader"
+        //    });
 
-    //    _sheetHelper = new GoogleSheetHelper(_sheetsService, _spreadsheetId);
+        //    Driveservices = new DriveService(new BaseClientService.Initializer()
+        //    {
+        //        HttpClientInitializer = credential,
+        //        ApplicationName = "My Gmail + Drive App",
+        //    });
 
-    //    Log("User authenticated via Gmail API.");
-    //}
+        //    _sheetsService = new SheetsService(new BaseClientService.Initializer()
+        //    {
+        //        HttpClientInitializer = credential,
+        //        ApplicationName = "Peer List Automation"
+        //    });
+
+        //    _sheetHelper = new GoogleSheetHelper(_sheetsService, _spreadsheetId);
+
+        //    Log("User authenticated via Gmail API.");
+        //}
 
         public async void StartPolling()
         {
             try
             {
                 ShowLoader();
+
+                // Create a separate log file for this polling session
+                try
+                {
+                    var logsDir = Path.Combine(saveFolder ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "InvoiceAttachments", "Logs");
+                    // If saveFolder is already set, prefer that
+                    if (!string.IsNullOrEmpty(saveFolder)) logsDir = Path.Combine(saveFolder, "Logs");
+                    Directory.CreateDirectory(logsDir);
+                    _logFilePath = Path.Combine(logsDir, $"StartPolling_{DateTime.Now:yyyyMMdd_HHmms}.txt");
+                    File.AppendAllText(_logFilePath, $"StartPolling invoked at {DateTime.Now:yyyy-MM-dd HH:mm:ss}\r\n");
+                }
+                catch
+                {
+                    // ignore failures to create a log file
+                }
+
                 if (cancellationTokenSource != null)
                 {
                     // If polling is already started, don't start again
@@ -436,6 +652,40 @@ namespace EmailPDFMatchKeyword
             //cancellationTokenSource = null;
         }
 
+        private async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> apiCall, int maxRetries = 5)
+        {
+            int retryCount = 0;
+            while (true)
+            {
+                try
+                {
+                    return await apiCall();
+                }
+                catch (Google.GoogleApiException ex) when (
+                    ex.HttpStatusCode == System.Net.HttpStatusCode.TooManyRequests || (ex.Error?.Errors?.Any(e => e.Reason == "userRateLimitExceeded" || e.Reason == "rateLimitExceeded") ?? false))
+                {
+                    retryCount++;
+
+                    // Try to read retry-after time if Google included it in error message
+                    int delayMs = (int)Math.Pow(2, retryCount) * 1000; // default exponential backoff
+
+                    Log($"⚠️ Gmail rate limit hit ({ex.Error?.Errors?.FirstOrDefault()?.Reason ?? "429"}). " +
+                        $"Retry #{retryCount} after {delayMs / 1000.0:F1}s...");
+
+                    await Task.Delay(delayMs);
+
+                    if (retryCount >= maxRetries)
+                        throw; // stop retrying if max exceeded
+                }
+                catch (Exception ex)
+                {
+                    Log($"❌ Unexpected Gmail API error: {ex.Message}");
+                    throw;
+                }
+            }
+        }
+
+
         public async Task PollMailboxAsync(CancellationToken cancellationToken)
         {
             if (service == null || service.HttpClientInitializer is not IConfigurableHttpClientInitializer credential)
@@ -457,9 +707,15 @@ namespace EmailPDFMatchKeyword
                     return;
                 }
 
+                //var labelsResponse = await ExecuteWithRetryAsync(() =>
+                //    service.Users.Labels.Get("me", "INBOX").ExecuteAsync(cancellationToken));
+
                 // --- Use THREADS list instead of MESSAGES list ---
                 var request = service.Users.Threads.List("me");
                 request.Q = "in:inbox is:unread";
+
+                var threadResponse = await ExecuteWithRetryAsync(() =>
+                request.ExecuteAsync(cancellationToken));
 
                 var allThreads = new List<Google.Apis.Gmail.v1.Data.Thread>();
                 string pageToken = null;
@@ -1060,20 +1316,46 @@ namespace EmailPDFMatchKeyword
                                          .Replace("-", "/");
             string logMessage = $"{dateTime} - {message}\r\n";
 
-            if (txtResults.InvokeRequired)
+            // Append to UI
+            if (txtResults != null)
             {
-                txtResults.Invoke(new Action(() =>
+                if (txtResults.InvokeRequired)
+                {
+                    txtResults.Invoke(new Action(() =>
+                    {
+                        txtResults.AppendText(logMessage);
+                        txtResults.SelectionStart = txtResults.Text.Length; // auto scroll
+                        txtResults.ScrollToCaret();
+                    }));
+                }
+                else
                 {
                     txtResults.AppendText(logMessage);
                     txtResults.SelectionStart = txtResults.Text.Length; // auto scroll
                     txtResults.ScrollToCaret();
-                }));
+                }
             }
-            else
+
+            // Append to file (if available)
+            try
             {
-                txtResults.AppendText(logMessage);
-                txtResults.SelectionStart = txtResults.Text.Length; // auto scroll
-                txtResults.ScrollToCaret();
+                string pathToUse = _logFilePath;
+                if (string.IsNullOrEmpty(pathToUse))
+                {
+                    // fallback to Documents/InvoiceAttachments/Logs
+                    var fallbackDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "InvoiceAttachments", "Logs");
+                    Directory.CreateDirectory(fallbackDir);
+                    pathToUse = Path.Combine(fallbackDir, $"Log_{DateTime.Now:yyyyMMdd}.txt");
+                }
+
+                lock (_logLock)
+                {
+                    File.AppendAllText(pathToUse, logMessage);
+                }
+            }
+            catch
+            {
+                // ignore logging failures to file to avoid crashing the app
             }
         }
 
