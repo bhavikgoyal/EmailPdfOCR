@@ -91,32 +91,32 @@ namespace EmailPDFMatchKeyword
                         var RequestUp = new BatchUpdateSpreadsheetRequest
                         {
                             Requests = new List<Request>
-              {
-                new Request
-                {
-                  UpdateSheetProperties = new UpdateSheetPropertiesRequest
-                  {
-                    Properties = new Google.Apis.Sheets.v4.Data.SheetProperties
-                    {
-                        SheetId = response.SheetId,
-                        Title = todaySheetName
-                    },
-                    Fields = "title"
-                  }
-                },
-                new Request
-                {
-                  UpdateSheetProperties = new UpdateSheetPropertiesRequest
-                  {
-                    Properties = new Google.Apis.Sheets.v4.Data.SheetProperties
-                    {
-                        SheetId = response.SheetId,
-                        Index = (templateSheet.Properties.Index ?? 0) + 1
-                    },
-                    Fields = "index"
-                  }
-                }
-              }
+                          {
+                            new Request
+                            {
+                              UpdateSheetProperties = new UpdateSheetPropertiesRequest
+                              {
+                                Properties = new Google.Apis.Sheets.v4.Data.SheetProperties
+                                {
+                                    SheetId = response.SheetId,
+                                    Title = todaySheetName
+                                },
+                                Fields = "title"
+                              }
+                            },
+                            new Request
+                            {
+                              UpdateSheetProperties = new UpdateSheetPropertiesRequest
+                              {
+                                Properties = new Google.Apis.Sheets.v4.Data.SheetProperties
+                                {
+                                    SheetId = response.SheetId,
+                                    Index = (templateSheet.Properties.Index ?? 0) + 1
+                                },
+                                Fields = "index"
+                              }
+                            }
+                          }
                         };
                         sheetsService.Spreadsheets.BatchUpdate(RequestUp, _spreadsheetId).Execute();
 
@@ -131,6 +131,16 @@ namespace EmailPDFMatchKeyword
                         _mainForm.Log("Proceeding to calculate previous sheet data and send email...");
                         await CalculateAndSendEmailAsync(); // Call the method to calculate and send the email
                         _mainForm.Log("Sheet Data Calculated & Email send Successfully");
+
+                        _mainForm.Log("Proceeding to calculate Match & Not Matched Records in Previous sheet and send email......  ");
+
+                        string targetSheetNameToProcess = GetPreviousWorkingDaySheetName(targetDate);
+                        _mainForm.Log($"📊 Processing previous working day sheet: {targetSheetNameToProcess}");
+
+                        var matchSummary = await MatchAndNotMatchRecordCountAsync(targetSheetNameToProcess);
+                        await SendEmailWithMatchSummary(matchSummary, targetSheetNameToProcess);
+
+                        _mainForm.Log("Match & Not Matched Records Data Calculated & Email send Successfully");
                     }
                     catch (Exception ex)
                     {
@@ -252,11 +262,10 @@ namespace EmailPDFMatchKeyword
                                             EndIndex = insertRow + 1
                                         },
                                         InheritFromBefore = true
-                                    } 
+                                    }
                                 }
                             }
                         };
-
                         sheetsService.Spreadsheets.BatchUpdate(expandRequest, _spreadsheetId).Execute();
                     }
 
@@ -264,24 +273,23 @@ namespace EmailPDFMatchKeyword
                     // 6. Build new row values (align with columns in screenshot)
                     _mainForm.Log("Building new row for insertion...");
                     var newRow = new List<object>
-                      {
-                          (insertRow - startDataRow + 1).ToString(),           // NO.
-                          "",                                                 // Initials (leave blank)
-                          //targetDate.ToString("MM/dd/yyyy" , CultureInfo.InvariantCulture),                  // DATE
-                          DateTime.Parse(targetDate.ToString()).ToString("MM/dd/yyyy", CultureInfo.InvariantCulture), // DATE
-                          provider ?? "",                                     // PROVIDER
-                          SCRIBETEAM ?? "",                                   // SCRIBE TEAM
-                          incidentDate ?? "",                                 // DOA
-                          "ISG",                                              // VENDOR
-                          caseNumber ?? "",                                   // CASE #
-                          claimantName ?? "",                                 // CLAIMANT NAME
-                          pages > 0 ? pages.ToString() : "",                  // PAGES
-                          "",                                                 // NOTES (blank)
-                          "",                                     // DATE SUBMITTED
-                          "",                                                 // TIME SUBMITTED
-                          "",                                                 // YES/NO
-                          Matchstatus ?? ""                                   // STATUS
-                      };
+                    {
+                        (insertRow - startDataRow + 1).ToString(),           // NO.
+                        "",                                                 // Initials (leave blank)
+                        DateTime.Parse(targetDate.ToString()).ToString("MM/dd/yyyy", CultureInfo.InvariantCulture), // DATE
+                        provider ?? "",                                     // PROVIDER
+                        SCRIBETEAM ?? "",                                   // SCRIBE TEAM
+                        incidentDate ?? "",                                 // DOA
+                        "ISG",                                              // VENDOR
+                        caseNumber ?? "",                                   // CASE #
+                        claimantName ?? "",                                 // CLAIMANT NAME
+                        pages > 0 ? pages.ToString() : "",                  // PAGES
+                        "",                                                 // NOTES (blank)
+                        "",                                     // DATE SUBMITTED
+                        "",                                                 // TIME SUBMITTED
+                        "",                                                 // YES/NO
+                        Matchstatus ?? ""                                   // STATUS
+                    };
 
                     // 7. Insert row
                     _mainForm.Log($"Inserting new row at {todaySheetName}!A{insertRow + 1}...");
@@ -1992,6 +2000,193 @@ namespace EmailPDFMatchKeyword
         }
 
 
+        public async Task<Dictionary<string, (int Matched, int NotMatched)>> MatchAndNotMatchRecordCountAsync(string sheetName)
+        {
+            var result = new Dictionary<string, (int Matched, int NotMatched)>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Mikhail"] = (0, 0),
+                ["Amurta"] = (0, 0),
+                ["Sarah"] = (0, 0),
+                ["Krina"] = (0, 0),
+                ["Patrizia"] = (0, 0),
+                ["Amanda"] = (0, 0)
+            };
+
+            try
+            {
+                _mainForm.ShowLoader();
+
+                var sheetsService = _mainForm.SheetsService;
+                var range = $"'{sheetName}'!A1:Z2000";
+                _mainForm.Log($"📄 Reading data from: {range}");
+
+                var request = sheetsService.Spreadsheets.Values.Get(_spreadsheetId, range);
+                var response = await request.ExecuteAsync();
+                var values = response.Values;
+
+                if (values == null || values.Count == 0)
+                {
+                    _mainForm.Log($"❌ No data found in sheet '{sheetName}'.");
+                    return result;
+                }
+
+                // Known teams
+                var teamNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Mikhail", "Amurta", "Sarah", "Krina", "Patrizia", "Amanda"
+        };
+
+                string currentTeam = null;
+                bool inDataSection = false;
+                int statusColumnIndex = -1;
+
+                for (int i = 0; i < values.Count; i++)
+                {
+                    var row = values[i];
+                    if (row == null || row.Count == 0)
+                        continue;
+
+                    string firstCell = row[0]?.ToString().Trim() ?? "";
+
+                    if (string.IsNullOrEmpty(firstCell))
+                        continue;
+
+                    // --- Detect team header ---
+                    if (teamNames.Contains(firstCell, StringComparer.OrdinalIgnoreCase))
+                    {
+                        currentTeam = firstCell;
+                        inDataSection = false;
+                        statusColumnIndex = -1;
+                        _mainForm.Log($"📍 Found team: {currentTeam}");
+                        continue;
+                    }
+
+                    // --- Detect header row ---
+                    if (currentTeam != null && !inDataSection)
+                    {
+                        bool hasCaseHeader = row.Any(c =>
+                            c != null && c.ToString().Trim().Equals("CASE #", StringComparison.OrdinalIgnoreCase));
+
+                        if (hasCaseHeader)
+                        {
+                            inDataSection = true;
+                            // Find STATUS column index
+                            for (int col = 0; col < row.Count; col++)
+                            {
+                                string colName = row[col]?.ToString().Trim();
+                                if (colName.Equals("STATUS", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    statusColumnIndex = col;
+                                    break;
+                                }
+                            }
+                            continue;
+                        }
+                    }
+
+                    // --- Count records by STATUS ---
+                    if (inDataSection && currentTeam != null && statusColumnIndex >= 0 && statusColumnIndex < row.Count)
+                    {
+                        string statusValue = row[statusColumnIndex]?.ToString().Trim().ToLowerInvariant();
+
+                        if (statusValue == "matched")
+                        {
+                            var data = result[currentTeam];
+                            data.Matched++;
+                            result[currentTeam] = data;
+                        }
+                        else if (statusValue == "not matched")
+                        {
+                            var data = result[currentTeam];
+                            data.NotMatched++;
+                            result[currentTeam] = data;
+                        }
+                    }
+                }
+
+                // ✅ Log summary
+                _mainForm.Log("✅ Match/NotMatch Summary");
+                foreach (var kv in result)
+                {
+                    _mainForm.Log($"📋 {kv.Key}\nMatched Records: {kv.Value.Matched}\nNotMatched Records: {kv.Value.NotMatched}\n");
+                }
+
+                int totalMatched = result.Values.Sum(v => v.Matched);
+                int totalNotMatched = result.Values.Sum(v => v.NotMatched);
+                _mainForm.Log($"📊 Overall Total: Matched = {totalMatched}, NotMatched = {totalNotMatched}");
+            }
+            catch (Exception ex)
+            {
+                _mainForm.Log($"❌ Error reading Match/NotMatch counts: {ex.Message}");
+            }
+            finally
+            {
+                _mainForm.HideLoader();
+            }
+
+            return result;
+        }
+
+        private async Task SendEmailWithMatchSummary( Dictionary<string, (int Matched, int NotMatched)> teamMatchSummary, string targetSheetNameToProcess)
+        {
+            _mainForm.ShowLoader();
+            var sb = new StringBuilder();
+
+            // --- Header ---
+            sb.AppendLine("<p>Hello,</p>");
+            sb.AppendLine($"<p>This is to notify you that the Match/NotMatch record summary for the ISG Peer reviews dated <strong>{targetSheetNameToProcess}</strong> is as follows:</p>");
+            sb.AppendLine("<br>");
+            sb.AppendLine("<h2>📊 Match vs NotMatch Summary</h2>");
+
+            if (teamMatchSummary == null || teamMatchSummary.Count == 0)
+            {
+                sb.AppendLine("<p><strong>No data found for this date.</strong></p>");
+            }
+            else
+            {
+                int totalMatched = 0;
+                int totalNotMatched = 0;
+
+                foreach (var team in teamMatchSummary)
+                {
+                    var teamName = team.Key;
+                    var matchedCount = team.Value.Matched;
+                    var notMatchedCount = team.Value.NotMatched;
+
+                    sb.AppendLine($"<h3>📋 {teamName}</h3>");
+                    sb.AppendLine($"<p>✅ <strong>Matched Records:</strong> {matchedCount}</p>");
+                    sb.AppendLine($"<p>❌ <strong>NotMatched Records:</strong> {notMatchedCount}</p>");
+                    sb.AppendLine("<br>");
+
+                    totalMatched += matchedCount;
+                    totalNotMatched += notMatchedCount;
+                }
+
+                sb.AppendLine("<hr>");
+                sb.AppendLine($"<h3>📊 <strong>Overall Summary:</strong></h3>");
+                sb.AppendLine($"<p>✅ Total Matched Records: <strong>{totalMatched}</strong></p>");
+                sb.AppendLine($"<p>❌ Total NotMatched Records: <strong>{totalNotMatched}</strong></p>");
+            }
+
+            string emailSubject = "✅ Match vs NotMatch Summary Report";
+            string emailBody = sb.ToString();
+
+            _mainForm.Log("📧 Sending Match/NotMatch summary email...");
+
+            var toList = AppSettingsHelper.Get("EmailTO")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(e => e.Trim());
+
+            var ccList = AppSettingsHelper.Get("EmailCC")
+                ?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(e => e.Trim());
+
+            await SendEmailAsync(toList, emailSubject, emailBody, isHtml: true, ccList);
+
+            _mainForm.HideLoader();
+            _mainForm.Log("✅ Match/NotMatch summary email sent successfully.");
+        }
+
         public async Task CalculateAndSendEmailAsync()
         {
             await Task.Run(() => CalculateAndSendEmail());
@@ -2050,15 +2245,23 @@ namespace EmailPDFMatchKeyword
         }
         private async Task<Dictionary<string, int>> GetTeamRecordCounts(string sheetName)
         {
-            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Mikhail"] = 0,
+                ["Amurta"] = 0,
+                ["Sarah"] = 0,
+                ["Krina"] = 0,
+                ["Patrizia"] = 0,
+                ["Amanda"] = 0
+            };
 
             try
             {
                 _mainForm.ShowLoader();
+
                 var sheetsService = _mainForm.SheetsService;
                 var range = $"'{sheetName}'!A1:Z1000";
-
-                _mainForm.Log($"📄 Reading data from sheet range: {range}");
+                _mainForm.Log($"📄 Reading data from: {range}");
 
                 var request = sheetsService.Spreadsheets.Values.Get(_spreadsheetId, range);
                 var response = await request.ExecuteAsync();
@@ -2070,65 +2273,72 @@ namespace EmailPDFMatchKeyword
                     return result;
                 }
 
-                string currentTeam = null;
-                int totalDataRows = 0;
+                // Our known team list
+                var teamNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Mikhail", "Amurta", "Sarah", "Krina", "Patrizia", "Amanda"
+        };
 
-                for (int i = 0; i < values.Count; i++)
+                string currentTeam = null;
+                bool inDataSection = false;
+
+                foreach (var row in values)
                 {
-                    var row = values[i];
                     if (row == null || row.Count == 0)
                         continue;
 
-                    string firstCell = row[0]?.ToString().Trim();
-                    if (string.IsNullOrWhiteSpace(firstCell))
+                    string firstCell = row[0]?.ToString().Trim() ?? "";
+
+                    if (string.IsNullOrEmpty(firstCell))
                         continue;
 
-                    // Detect TEAM HEADER rows
-                    bool looksLikeTeamHeader =
-                        !firstCell.Any(char.IsDigit) &&
-                        (row.Count <= 5) &&
-                        firstCell.Length >= 3 &&
-                        firstCell.ToUpperInvariant() == firstCell.Trim().ToUpperInvariant();
-
-                    if (looksLikeTeamHeader)
+                    // --- Detect team header by name match ---
+                    if (teamNames.Contains(firstCell, StringComparer.OrdinalIgnoreCase))
                     {
-                        currentTeam = firstCell.Trim().ToUpperInvariant();
-
-                        if (!result.ContainsKey(currentTeam))
-                            result[currentTeam] = 0;
-
-                        //_mainForm.Log($"📍 Found team header: {currentTeam}");
+                        currentTeam = firstCell;
+                        inDataSection = false;
+                        _mainForm.Log($"📍 Found team: {currentTeam}");
                         continue;
                     }
 
-                    // Detect data rows (start with a number)
-                    if (int.TryParse(firstCell, out _))
+                    // --- Detect the "CASE #" header row (signals start of data section) ---
+                    bool isCaseHeader = row.Any(c =>
+                        c != null &&
+                        c.ToString().Trim().Equals("CASE #", StringComparison.OrdinalIgnoreCase));
+
+                    if (isCaseHeader)
                     {
-                        string teamKey = (currentTeam ?? "UNKNOWN").Trim().ToUpperInvariant();
+                        inDataSection = true;
+                        continue;
+                    }
 
-                        if (teamKey == "UNKNOWN")
-                            _mainForm.Log($"⚠️ Row {i + 1}: Data found before any team header — assigning to UNKNOWN.");
+                    // --- Count data rows ---
+                    if (inDataSection && !string.IsNullOrEmpty(currentTeam))
+                    {
+                        // Detect valid data by checking if any cell looks like a numeric CASE #
+                        bool hasCaseNumber = row.Any(c =>
+                            int.TryParse(c?.ToString().Trim() ?? "", out _));
 
-                        if (!result.ContainsKey(teamKey))
-                            result[teamKey] = 0;
-
-                        result[teamKey]++;
-                        totalDataRows++;
+                        if (hasCaseNumber)
+                        {
+                            result[currentTeam]++;
+                        }
                     }
                 }
 
-                //// ✅ Log full summary
-                //_mainForm.Log("✅ Team Record Summary (All Teams):");
-                //foreach (var team in result)
-                //{
-                //    _mainForm.Log($"📋 {team.Key}: {team.Value} records");
-                //}
+                // --- Log summary ---
+                _mainForm.Log("✅ Calculated Data Summary");
+                foreach (var kv in result)
+                {
+                    _mainForm.Log($"📋 {kv.Key}\nTotal Records: {kv.Value}\n");
+                }
 
-                _mainForm.Log($"📊 TOTAL data rows processed: {totalDataRows}");
+                int overallTotal = result.Values.Sum();
+                _mainForm.Log($"📊 Overall Total Records: {overallTotal}");
             }
             catch (Exception ex)
             {
-                _mainForm.Log($"❌ Error reading team counts from '{sheetName}': {ex.Message}");
+                _mainForm.Log($"❌ Error reading counts: {ex.Message}");
             }
             finally
             {
@@ -2143,7 +2353,6 @@ namespace EmailPDFMatchKeyword
             _mainForm.ShowLoader();
             var sb = new StringBuilder();
 
-            // --- Header message ---
             sb.AppendLine("<p>Hello,</p>");
             sb.AppendLine($"<p>This is to notify you that we have finalized the ISG Peer reviews for date: <strong>{targetSheetNameToProcess}</strong> summary and the brief details are as below:</p>");
             sb.AppendLine("<br>");
@@ -2157,7 +2366,6 @@ namespace EmailPDFMatchKeyword
             {
                 int grandTotal = 0;
 
-                // Loop through each team and output only the team name and total records
                 foreach (var team in teamRecordCounts)
                 {
                     sb.AppendLine($"<h3>📋 {team.Key}</h3>");
@@ -2186,10 +2394,8 @@ namespace EmailPDFMatchKeyword
             await SendEmailAsync(toList, emailSubject, emailBody, isHtml: true, ccList);
 
             _mainForm.HideLoader();
-
             _mainForm.Log("✅ Email sent successfully.");
         }
-
 
         private string GetMimeType(string filePath)
         {
