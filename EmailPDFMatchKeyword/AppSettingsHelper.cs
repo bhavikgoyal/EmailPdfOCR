@@ -28,5 +28,15 @@ namespace EmailPDFMatchKeyword
     {
       return _configuration.GetSection(sectionName).Get<T>();
     }
+	public static string[] GetArray(string key)
+	{
+		var section = _configuration.GetSection(key);
+
+		if (!section.Exists())
+			return Array.Empty<string>();
+
+		var values = section.Get<string[]>();
+		return values ?? Array.Empty<string>();
+	}
   }
 }
