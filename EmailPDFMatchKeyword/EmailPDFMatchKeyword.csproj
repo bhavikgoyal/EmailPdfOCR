@@ -950,6 +950,9 @@
     <None Update="appsettings.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <None Update="Email_Logo.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="ghostscript\acctest.ps">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
