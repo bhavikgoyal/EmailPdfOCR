@@ -130,6 +130,8 @@ namespace EmailPDFMatchKeyword
                 // ignore logging initialization failures
             }
 
+			this.Icon = new Icon("Email_Logo.ico");
+
 			// Start button
 			Button btnStart = new Button { Text = "Start", Left = 10, Top = 10 };
 			// Stop button
