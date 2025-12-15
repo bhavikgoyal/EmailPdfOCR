@@ -1,4 +1,5 @@
 ﻿using DocumentFormat.OpenXml.Spreadsheet;
+using DocumentFormat.OpenXml.Wordprocessing;
 using Google.Apis.Drive.v3;
 using Google.Apis.Gmail.v1;
 using Google.Apis.Sheets.v4;
@@ -11,6 +12,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Tesseract;
+using ColorType = ImageMagick.ColorType;
 
 namespace EmailPDFMatchKeyword
 {
@@ -34,36 +36,56 @@ namespace EmailPDFMatchKeyword
         private GoogleSheetHelper _sheetHelper;
 
 
-        public async Task InsertDataIntoSheetORDataBase(string provider, string caseNumber, string claimantName, string incidentDate, int pages, string Matchstatus, string SCRIBETEAM)
-        {
+
+		public async Task InsertDataIntoSheetORDataBase( string provider, string caseNumber, string claimantName, DateTime emailReceivedUtc,  string incidentDate, int pages, string Matchstatus, string SCRIBETEAM, string Fullsubject)
+		{
             try
             {
                 _mainForm.ShowLoader();
-                // Get current US Eastern Time
+
                 TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+
+                // Ensure emailReceivedUtc is treated as UTC
+                if (emailReceivedUtc.Kind != DateTimeKind.Utc)
+                {
+                    emailReceivedUtc = DateTime.SpecifyKind(emailReceivedUtc, DateTimeKind.Utc);
+                }
+
+                DateTime emailReceivedEastern = TimeZoneInfo.ConvertTimeFromUtc(emailReceivedUtc, easternZone);
+
+                // (Optional) Only for logging: current US time
                 DateTime usNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, easternZone);
+
                 _mainForm.Log($"⏰ Current US (Eastern) time: {usNow}");
+                _mainForm.Log($"📧 Email received (UTC):    {emailReceivedUtc:u}");
+                _mainForm.Log($"📧 Email received (EST):    {emailReceivedEastern:G}");
 
-                DateTime targetDate = CalculateTargetSheetDate(usNow);
+                // ---------------------------------------------
+                // 2️⃣ Decide sheet date based on EMAIL time
+                // ---------------------------------------------
+                // Pehle yaha DateTime.UtcNow pass kar rahe the,
+                // ab emailReceivedEastern pass kar rahe hain.
+                DateTime targetDate = CalculateTargetSheetDate(emailReceivedEastern);
 
-                _mainForm.Log($"Start inserting Data in Database...");
+                _mainForm.Log($"📅 Target sheet date (based on email): {targetDate:MM/dd/yyyy}");
 
+                _mainForm.Log("Start inserting Data in Database...");
+
+                // DB me bhi same targetDate ka string store kar rahe hain
                 SqliteHelper.InsertCopyTemplateSheet(provider, caseNumber, claimantName, incidentDate, pages, Matchstatus, SCRIBETEAM, targetDate.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture));
 
-                _mainForm.Log($"Insert the data into Database succcessfull......");
+                _mainForm.Log("Insert the data into Database successful.");
 
+                // Sheet name = MM/dd
                 string todaySheetName = targetDate.ToString("MM/dd", CultureInfo.InvariantCulture);
-                _mainForm.Log($"📄 Target sheet date selected: {todaySheetName}");
+                _mainForm.Log($"📄 Target sheet name selected: {todaySheetName}");
                 var sheetsService = _mainForm.SheetsService;
 
-
+                // ---------------------------------------------
+                // 3️⃣ Check if sheet exists, otherwise create from TEMPLATE
+                // ---------------------------------------------
                 var spreadsheet = sheetsService.Spreadsheets.Get(_spreadsheetId).Execute();
                 var todaySheet = spreadsheet.Sheets.FirstOrDefault(s => s.Properties.Title == todaySheetName);
-
-                if (todaySheet != null)
-                    _mainForm.Log($"✅ Using existing sheet: {todaySheetName}");
-                else
-                    _mainForm.Log($"❌ Sheet not found. You may need to copy the template to create {todaySheetName}.");
 
                 if (todaySheet != null)
                 {
@@ -71,10 +93,10 @@ namespace EmailPDFMatchKeyword
                 }
                 else
                 {
+                    _mainForm.Log($"❌ Sheet not found. Creating new sheet from template for {todaySheetName}...");
+
                     try
                     {
-                        _mainForm.Log($"❌ No sheet found for {todaySheetName}. Creating new sheet from template...");
-
                         var templateSheet = spreadsheet.Sheets.FirstOrDefault(s => s.Properties.Title == "TEMPLATE");
                         if (templateSheet == null) throw new Exception("❌ Template sheet not found.");
 
@@ -83,240 +105,577 @@ namespace EmailPDFMatchKeyword
                             DestinationSpreadsheetId = _spreadsheetId
                         };
 
-                        var response = sheetsService.Spreadsheets.Sheets.CopyTo(copyRequest, _spreadsheetId, (int)templateSheet.Properties.SheetId).Execute();
+                        var response = sheetsService.Spreadsheets.Sheets
+                            .CopyTo(copyRequest, _spreadsheetId, (int)templateSheet.Properties.SheetId)
+                            .Execute();
 
                         _mainForm.Log($"Renaming copied sheet to {todaySheetName} and positioning it next to template...");
 
-                        // Rename + Move beside template
                         var RequestUp = new BatchUpdateSpreadsheetRequest
-                        {
-                            Requests = new List<Request>
-                          {
-                            new Request
-                            {
-                              UpdateSheetProperties = new UpdateSheetPropertiesRequest
-                              {
-                                Properties = new Google.Apis.Sheets.v4.Data.SheetProperties
-                                {
-                                    SheetId = response.SheetId,
-                                    Title = todaySheetName
-                                },
-                                Fields = "title"
-                              }
-                            },
-                            new Request
-                            {
-                              UpdateSheetProperties = new UpdateSheetPropertiesRequest
-                              {
-                                Properties = new Google.Apis.Sheets.v4.Data.SheetProperties
-                                {
-                                    SheetId = response.SheetId,
-                                    Index = (templateSheet.Properties.Index ?? 0) + 1
-                                },
-                                Fields = "index"
-                              }
-                            }
-                          }
-                        };
-                        sheetsService.Spreadsheets.BatchUpdate(RequestUp, _spreadsheetId).Execute();
-
-                        spreadsheet = sheetsService.Spreadsheets.Get(_spreadsheetId).Execute();
-                        todaySheet = spreadsheet.Sheets.FirstOrDefault(s => s.Properties.SheetId == response.SheetId);
-
-                        // Generate direct sheet link
-                        string sheetLink = $"https://docs.google.com/spreadsheets/d/{_spreadsheetId}/edit#gid={response.SheetId}";
-                        _mainForm.Log($"✅ New sheet created: <a href='{sheetLink}' target='_blank'>{todaySheetName}</a>");
-
-
-                        _mainForm.Log("Proceeding to calculate previous sheet data and send email...");
-                        await CalculateAndSendEmailAsync(); // Call the method to calculate and send the email
-                        _mainForm.Log("Sheet Data Calculated & Email send Successfully");
-
-                        _mainForm.Log("Proceeding to calculate Match & Not Matched Records in Previous sheet and send email......  ");
-
-                        string targetSheetNameToProcess = GetPreviousWorkingDaySheetName(targetDate);
-                        _mainForm.Log($"📊 Processing previous working day sheet: {targetSheetNameToProcess}");
-
-                        var matchSummary = await MatchAndNotMatchRecordCountAsync(targetSheetNameToProcess);
-                        await SendEmailWithMatchSummary(matchSummary, targetSheetNameToProcess);
-
-                        _mainForm.Log("Match & Not Matched Records Data Calculated & Email send Successfully");
-                    }
-                    catch (Exception ex)
-                    {
-                        _mainForm.Log($"❌ Failed to create new sheet: {ex.Message}");
-                        return;
-                    }
-                }
-
-                _mainForm.Log($"Loading values from {todaySheetName}...");
-
-                try
-                {
-                    // 2. Load all values
-                    var range = $"{todaySheetName}!A1:Z5000";
-                    var getRequest = sheetsService.Spreadsheets.Values.Get(_spreadsheetId, range);
-                    var values = getRequest.Execute().Values ?? new List<IList<object>>();
-
-                    // 3. Find provider section
-                    _mainForm.Log($"Searching for provider section for '{provider}'...");
-                    int providerSectionRow = -1;
-                    for (int r = 0; r < values.Count; r++)
-                    {
-                        string rowText = string.Join(" ", values[r]).ToUpperInvariant();
-                        if (rowText.Contains(provider.ToUpperInvariant()))
-                        {
-                            providerSectionRow = r;
-                            break;
-                        }
-                    }
-
-                    if (providerSectionRow == -1)
-                        _mainForm.Log($"❌ Provider '{provider}' not found in any section.");
-
-
-                    // 4. Find header row (first row after provider section with "NO.", "DATE", etc.)
-                    _mainForm.Log("Looking for header row...");
-                    int headerRow = -1;
-                    string[] headerKeywords = { "NO", "DATE", "PROVIDER", "CASE", "CLAIMANT", "PAGES", "STATUS" };
-                    for (int r = providerSectionRow; r < values.Count; r++)
-                    {
-                        int matches = headerKeywords.Count(h => values[r].Any(v => v.ToString().ToUpper().Contains(h)));
-                        if (matches >= 2) { headerRow = r; break; }
-                    }
-                    if (headerRow == -1) throw new Exception($"❌ Header row not found for provider {provider}");
-
-                    int startDataRow = headerRow + 1;
-
-                    //// 5. Find first empty row after header
-                    //_mainForm.Log("Finding first empty row after header...");
-                    //int insertRow = values.Count;
-                    //for (int r = startDataRow; r < values.Count; r++)
-                    //{
-                    //  bool isEmpty = values[r].All(v => string.IsNullOrWhiteSpace(v?.ToString()));
-                    //  if (isEmpty) { insertRow = r; break; }
-                    //}
-                    //if (insertRow == values.Count) insertRow = values.Count + 1;
-
-
-                    // 5. Find the last row within the current provider's section
-                    _mainForm.Log("Finding insert position within provider section...");
-
-                    int insertRow = -1;
-                    bool nextProviderFound = false;
-                    int providerRecordCount = 0;
-
-                    for (int r = startDataRow; r < values.Count; r++)
-                    {
-                        var row = values[r];
-
-                        string rowText = string.Join(" ", row).ToUpperInvariant();
-
-                        // If the row contains another provider's name, stop — this marks a new section
-                        if (!string.IsNullOrWhiteSpace(rowText) &&
-                            (rowText.Contains("AMURTA") || rowText.Contains("MIKHAIL") || rowText.Contains("SARAH") ||
-                             rowText.Contains("KRINA") || rowText.Contains("PATRIZIA") || rowText.Contains("AMANDA")))
-                        {
-                            nextProviderFound = true;
-                            insertRow = r; // insert before next section
-                            break;
-                        }
-
-                        // Continue tracking until we hit empty row
-                        bool isEmpty = row.All(cell => string.IsNullOrWhiteSpace(cell?.ToString()));
-                        if (!isEmpty)
-                            providerRecordCount++;
-                        else
-                        {
-                            insertRow = r;
-                            break;
-                        }
-                        //if (isEmpty)
-                        //{
-                        //    insertRow = r;
-                        //    break;
-                        //}
-                    }
-
-                    // If no empty row or new provider found, append at end
-                    if (insertRow == -1)
-                        insertRow = values.Count;
-
-                    // ✅ If provider section already has 20 records, insert a blank row to expand it
-                    if (providerRecordCount >= 20)
-                    {
-                        _mainForm.Log($"Provider '{provider}' has {providerRecordCount} records. Expanding section by inserting a new blank row...");
-                        var expandRequest = new BatchUpdateSpreadsheetRequest
                         {
                             Requests = new List<Request>
                             {
                                 new Request
                                 {
-                                    InsertDimension = new InsertDimensionRequest
+                                    UpdateSheetProperties = new UpdateSheetPropertiesRequest
                                     {
-                                        Range = new DimensionRange
+                                        Properties = new Google.Apis.Sheets.v4.Data.SheetProperties
                                         {
-                                            SheetId = todaySheet.Properties.SheetId,
-                                            Dimension = "ROWS",
-                                            StartIndex = insertRow,
-                                            EndIndex = insertRow + 1
+                                            SheetId = response.SheetId,
+                                            Title = todaySheetName
                                         },
-                                        InheritFromBefore = true
+                                        Fields = "title"
+                                    }
+                                },
+                                new Request
+                                {
+                                    UpdateSheetProperties = new UpdateSheetPropertiesRequest
+                                    {
+                                        Properties = new Google.Apis.Sheets.v4.Data.SheetProperties
+                                        {
+                                            SheetId = response.SheetId,
+                                            Index = (templateSheet.Properties.Index ?? 0) + 1
+                                        },
+                                        Fields = "index"
                                     }
                                 }
                             }
                         };
-                        sheetsService.Spreadsheets.BatchUpdate(expandRequest, _spreadsheetId).Execute();
+
+                        sheetsService.Spreadsheets.BatchUpdate(RequestUp, _spreadsheetId).Execute();
+
+                        spreadsheet = sheetsService.Spreadsheets.Get(_spreadsheetId).Execute();
+                        todaySheet = spreadsheet.Sheets.FirstOrDefault(s => s.Properties.SheetId == response.SheetId);
+
+                        string sheetLink = $"https://docs.google.com/spreadsheets/d/{_spreadsheetId}/edit#gid={response.SheetId}";
+                        _mainForm.Log($"✅ New sheet created: <a href='{sheetLink}' target='_blank'>{todaySheetName}</a>");
+
+						string targetSheetNameToProcess = GetPreviousWorkingDaySheetName(targetDate);
+
+						// Optional: ye logic ab bhi SAME rahega, bas targetDate email-date based hai
+						_mainForm.Log("Proceeding to calculate previous sheet data and send email...");
+                        await CalculateAndSendEmailAsync(targetSheetNameToProcess);
+                        _mainForm.Log("Sheet Data Calculated & Email sent Successfully");
+
+                        _mainForm.Log("Proceeding to calculate Match & Not Matched Records in previous sheet and send email...");
+
+                        
+                        _mainForm.Log($"📊 Processing previous working day sheet: {targetSheetNameToProcess}");
+
+                        var matchSummary = await MatchAndNotMatchRecordCountAsync(targetSheetNameToProcess);
+                        await SendEmailWithMatchSummary(matchSummary, targetSheetNameToProcess);
+
+                        _mainForm.Log("Match & Not Matched Records Data Calculated & Email sent Successfully");
                     }
-
-
-                    // 6. Build new row values (align with columns in screenshot)
-                    _mainForm.Log("Building new row for insertion...");
-                    var newRow = new List<object>
+                    catch (Exception ex)
                     {
-                        (insertRow - startDataRow + 1).ToString(),           // NO.
-                        "",                                                 // Initials (leave blank)
-                        DateTime.Parse(targetDate.ToString()).ToString("MM/dd/yyyy", CultureInfo.InvariantCulture), // DATE
-                        provider ?? "",                                     // PROVIDER
-                        SCRIBETEAM ?? "",                                   // SCRIBE TEAM
-                        incidentDate ?? "",                                 // DOA
-                        "ISG",                                              // VENDOR
-                        caseNumber ?? "",                                   // CASE #
-                        claimantName ?? "",                                 // CLAIMANT NAME
-                        pages > 0 ? pages.ToString() : "",                  // PAGES
-                        "",                                                 // NOTES (blank)
-                        "",                                     // DATE SUBMITTED
-                        "",                                                 // TIME SUBMITTED
-                        "",                                                 // YES/NO
-                        Matchstatus ?? ""                                   // STATUS
-                    };
-
-                    // 7. Insert row
-                    _mainForm.Log($"Inserting new row at {todaySheetName}!A{insertRow + 1}...");
-                    string insertRange = $"{todaySheetName}!A{insertRow + 1}";
-                    var valueRange = new ValueRange { Values = new List<IList<object>> { newRow } };
-
-                    var updateRequest = sheetsService.Spreadsheets.Values.Update(valueRange, _spreadsheetId, insertRange);
-                    updateRequest.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
-                    updateRequest.Execute();
-                    _mainForm.HideLoader();
-
-                    _mainForm.Log($"✅ Row inserted at {todaySheetName}!A{insertRow + 1} for provider {provider}");
-
+                        _mainForm.Log($"❌ Failed to create new sheet: {ex.Message}");
+                        _mainForm.HideLoader();
+                        return;
+                    }
                 }
-                catch (Google.GoogleApiException gEx)
-                {
-                    _mainForm.Log($"❌ Google Sheets API Error while reading sheet '{todaySheetName}': {gEx.Message}");
-                }
+                _mainForm.Log($"Loading values from {todaySheetName}...");
 
-            }
-            catch (Exception ex)
+				try
+				{
+					// ---------------------------------------------
+					// 4️⃣ Load sheet values
+					// ---------------------------------------------
+					var range = $"{todaySheetName}!A1:Z5000";
+					var getRequest = sheetsService.Spreadsheets.Values.Get(_spreadsheetId, range);
+					var values = getRequest.Execute().Values ?? new List<IList<object>>();
+
+					// ---------------------------------------------
+					// Constants / settings
+					// ---------------------------------------------
+					const string NotFoundTitle = "Not Found Provider Records";
+					const string NotFoundTitleUpper = "NOT FOUND PROVIDER RECORDS";
+
+					// how many data rows each provider block should conceptually have
+					const int ReservedDataRowsPerProvider = 14;
+
+					// header keywords for detection
+					string[] headerKeywords = { "NO", "DATE", "PROVIDER", "CASE", "CLAIMANT", "PAGES", "STATUS" };
+
+					// ---------------------------------------------
+					// Known provider section titles (for boundaries)
+					// ---------------------------------------------
+					string[] knownProviders = AppSettingsHelper
+						.GetArray("KnownProviders")
+						.Select(p => p.ToUpperInvariant())
+						.ToArray();
+
+					// Always include the special block as a section boundary
+					if (!knownProviders.Contains(NotFoundTitleUpper))
+					{
+						knownProviders = knownProviders
+							.Concat(new[] { NotFoundTitleUpper })
+							.ToArray();
+					}
+
+					var providerUpper = (provider ?? string.Empty).ToUpperInvariant();
+
+					// 5️⃣ Try to find provider section
+					_mainForm.Log($"Searching for provider section for '{provider}'...");
+					int providerSectionRow = -1;
+
+					if (!string.IsNullOrWhiteSpace(providerUpper))
+					{
+						for (int r = 0; r < values.Count; r++)
+						{
+							string rowText = string.Join(" ", values[r]).ToUpperInvariant();
+							if (rowText.Contains(providerUpper))
+							{
+								providerSectionRow = r; // 0-based index (title row)
+								break;
+							}
+						}
+					}
+
+					int headerRow = -1;
+					int startDataRow = -1;
+					bool isNewSectionCreated = false;
+					bool isNotFoundProviderBlock = false;
+
+					// ---------------------------------------------
+					// If provider section is NOT found → use "Not Found Provider Records" block
+					// ---------------------------------------------
+					if (providerSectionRow == -1)
+					{
+						_mainForm.Log($"⚠️ Provider '{provider}' not found. Using '{NotFoundTitle}' block...");
+
+						// Look for existing "Not Found Provider Records" section
+						for (int r = 0; r < values.Count; r++)
+						{
+							string rowText = string.Join(" ", values[r]).ToUpperInvariant();
+							if (rowText.Contains(NotFoundTitleUpper))
+							{
+								providerSectionRow = r; // title row index
+								break;
+							}
+						}
+
+						// 👉 we are definitely using the Not Found Provider block
+						isNotFoundProviderBlock = true;
+
+						// If even that block doesn't exist → create it AFTER last provider block
+						if (providerSectionRow == -1)
+						{
+							_mainForm.Log($"'{NotFoundTitle}' block not found. Creating new block after last provider block...");
+
+							// 1️⃣ Find the LAST provider header row among known providers
+							int lastProviderHeaderRow = -1;
+							var realProviders = knownProviders
+								.Where(p => p != NotFoundTitleUpper) // exclude our special block
+								.ToArray();
+
+							for (int r = 0; r < values.Count; r++)
+							{
+								string rowText = string.Join(" ", values[r]).ToUpperInvariant();
+
+								// If this row belongs to a known provider section (title row)
+								if (realProviders.Any(p => rowText.Contains(p)))
+								{
+									// Search for that provider's header row ("NO", "DATE", etc.)
+									for (int r2 = r + 1; r2 < values.Count; r2++)
+									{
+										int matches = headerKeywords.Count(h =>
+											values[r2].Any(v => v?.ToString().ToUpperInvariant().Contains(h) == true));
+
+										if (matches >= 2)
+										{
+											if (r2 > lastProviderHeaderRow)
+												lastProviderHeaderRow = r2; // remember the last (lowest) header row
+											break;
+										}
+									}
+								}
+							}
+
+							// 2️⃣ Decide where to place "Not Found Provider Records" title row
+							int titleRowIndex;
+							if (lastProviderHeaderRow != -1)
+							{
+								// place after [header + ReservedDataRows]
+								titleRowIndex = lastProviderHeaderRow + 1 + ReservedDataRowsPerProvider;
+							}
+							else
+							{
+								// fallback: append at end
+								titleRowIndex = values.Count;
+							}
+
+							// Calculate needed indices (0-based)
+							providerSectionRow = titleRowIndex;       // title row index
+							headerRow = providerSectionRow + 1;       // header row index
+							startDataRow = headerRow + 1;             // first data row index
+
+							// 🔍 Ensure sheet has enough rows for title + header
+							int currentRowCount = todaySheet.Properties.GridProperties.RowCount ?? values.Count;
+							// highest row index we will touch = headerRow
+							int maxNeededRowIndex = headerRow;
+							int neededRowCount = maxNeededRowIndex + 1;  // convert to 1-based count
+
+							if (neededRowCount > currentRowCount)
+							{
+								int rowsToAdd = neededRowCount - currentRowCount;
+
+								_mainForm.Log($"Sheet has {currentRowCount} rows, need {neededRowCount}. Inserting {rowsToAdd} more row(s) at bottom...");
+
+								var addRowsRequest = new BatchUpdateSpreadsheetRequest
+								{
+									Requests = new List<Request>
+		                            {
+			                            new Request
+			                            {
+				                            InsertDimension = new InsertDimensionRequest
+				                            {
+					                            Range = new DimensionRange
+					                            {
+						                            SheetId = todaySheet.Properties.SheetId,
+						                            Dimension = "ROWS",
+						                            StartIndex = currentRowCount,              // insert after last existing row (0-based)
+                                                    EndIndex = currentRowCount + rowsToAdd
+					                            },
+					                            InheritFromBefore = true
+				                            }
+			                            }
+		                            }
+								};
+
+								sheetsService.Spreadsheets.BatchUpdate(addRowsRequest, _spreadsheetId).Execute();
+
+								// Update local row count (optional, for your own logic)
+								currentRowCount += rowsToAdd;
+								_mainForm.Log($"✅ Inserted {rowsToAdd} row(s). New row count = {currentRowCount}.");
+							}
+
+							// 3️⃣ Write title + header (now we know the grid is big enough)
+							var titleRow = new List<object>
+                            {
+	                            NotFoundTitle
+                            };
+
+							var headerRowValues = new List<object>
+                            {
+	                            "NO.", "INITIALS", "DATE", "PROVIDER", "SCRIBE TEAM", "DOA", "VENDOR", "CASE #", "CLAIMANT NAME", "PAGES", "NOTES [Email Subject]", "DATE SUBMITTED", "TIME SUBMITTED", "YES/NO", "STATUS"
+                            };
+
+							string sectionRange = $"{todaySheetName}!A{providerSectionRow + 1}:O{headerRow + 1}";
+							var sectionValueRange = new ValueRange
+							{
+								Values = new List<IList<object>> { titleRow, headerRowValues }
+							};
+
+							var sectionUpdateRequest =
+								sheetsService.Spreadsheets.Values.Update(sectionValueRange, _spreadsheetId, sectionRange);
+							sectionUpdateRequest.ValueInputOption =
+								SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
+							sectionUpdateRequest.Execute();
+
+							isNewSectionCreated = true;
+							_mainForm.Log($"✅ Created '{NotFoundTitle}' block starting at row {providerSectionRow + 1} (header at row {headerRow + 1}).");
+						}
+					}
+
+					// ---------------------------------------------
+					// 6️⃣ Find header row (if not already set when creating block)
+					// ---------------------------------------------
+					if (!isNewSectionCreated)
+					{
+						_mainForm.Log("Looking for header row...");
+
+						for (int r = providerSectionRow + 1; r < values.Count; r++)
+						{
+							int matches = headerKeywords.Count(h =>
+								values[r].Any(v => v?.ToString().ToUpperInvariant().Contains(h) == true));
+
+							if (matches >= 2)
+							{
+								headerRow = r;
+								break;
+							}
+						}
+
+						if (headerRow == -1)
+						{
+							// Header not found → create it right after title row
+							_mainForm.Log($"❌ Header row not found for section starting at row {providerSectionRow + 1}. Creating header row...");
+
+							headerRow = providerSectionRow + 1;
+							startDataRow = headerRow + 1;
+
+							var headerRowValues = new List<object>
+			                {
+				                "NO.", "INITIALS", "DATE", "PROVIDER", "SCRIBE TEAM", "DOA", "VENDOR", "CASE #", "CLAIMANT NAME", "PAGES", "NOTES", "DATE SUBMITTED", "TIME SUBMITTED", "YES/NO", "STATUS"
+			                };
+
+							string headerRange = $"{todaySheetName}!A{headerRow + 1}:O{headerRow + 1}";
+							var headerValueRange = new ValueRange
+							{
+								Values = new List<IList<object>> { headerRowValues }
+							};
+
+							var headerUpdateRequest =
+								sheetsService.Spreadsheets.Values.Update(headerValueRange, _spreadsheetId, headerRange);
+							headerUpdateRequest.ValueInputOption =
+								SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
+							headerUpdateRequest.Execute();
+
+							_mainForm.Log($"✅ Header row created at row {headerRow + 1}.");
+						}
+						else
+						{
+							startDataRow = headerRow + 1;
+						}
+					}
+
+					// -----------------------------------------------
+					// 7️⃣ CHECK IF CASE NUMBER ALREADY EXISTS IN THIS SECTION
+					// Skip check if it's a brand new "Not Found" block (no data yet)
+					// -----------------------------------------------
+					_mainForm.Log($"Checking if Case Number '{caseNumber}' already exists in this section...");
+
+					bool caseExists = false;
+
+					if (!isNewSectionCreated)
+					{
+						for (int r = startDataRow; r < values.Count; r++)
+						{
+							var row = values[r];
+
+							string rowTextCheck = string.Join(" ", row).ToUpperInvariant();
+
+							// Stop scanning if next provider/section begins
+							if (!string.IsNullOrWhiteSpace(rowTextCheck) &&
+								knownProviders.Any(p => rowTextCheck.Contains(p)))
+							{
+								break; // new section reached
+							}
+
+							// Case Number column index 7 (H)
+							if (row.Count > 7)
+							{
+								string existingCase = row[7]?.ToString()?.Trim();
+
+								if (!string.IsNullOrWhiteSpace(existingCase) &&
+									existingCase.Equals(caseNumber, StringComparison.OrdinalIgnoreCase))
+								{
+									caseExists = true;
+									break;
+								}
+							}
+						}
+					}
+
+					if (caseExists)
+					{
+						_mainForm.Log($"⚠️ Case Number '{caseNumber}' already exists in this section. Skipping insert.");
+						_mainForm.HideLoader();
+						return;
+					}
+
+					_mainForm.Log("Case number not found. Proceeding to insert new row...");
+
+					// ---------------------------------------------
+					// 8️⃣ Find insert position within this section
+					// ---------------------------------------------
+					_mainForm.Log("Finding insert position within section...");
+
+					int insertRow = -1;
+					int providerRecordCount = 0;
+
+					if (isNewSectionCreated)
+					{
+						// First data row in the new "Not Found Provider Records" block
+						insertRow = startDataRow;
+						providerRecordCount = 0;
+					}
+					else
+					{
+						for (int r = startDataRow; r < values.Count; r++)
+						{
+							var row = values[r];
+							string rowText = string.Join(" ", row).ToUpperInvariant();
+
+							// If the row contains another provider's name or the special block name,
+							// it marks the start of a different section.
+							if (!string.IsNullOrWhiteSpace(rowText) &&
+								knownProviders.Any(p => rowText.Contains(p)))
+							{
+								insertRow = r; // insert before next section
+								break;
+							}
+
+							bool isEmpty = row.All(cell => string.IsNullOrWhiteSpace(cell?.ToString()));
+							if (!isEmpty)
+							{
+								providerRecordCount++;
+							}
+							else
+							{
+								insertRow = r;
+								break;
+							}
+						}
+
+						// If no empty row or new section found, append at end
+						if (insertRow == -1)
+							insertRow = values.Count;
+					}
+
+					// ✅ If section already has 20 records, expand by inserting a blank row
+					if (!isNewSectionCreated && providerRecordCount >= 20)
+					{
+						_mainForm.Log($"Section has {providerRecordCount} records. Expanding by inserting a new blank row...");
+						var expandRequest = new BatchUpdateSpreadsheetRequest
+						{
+							Requests = new List<Request>
+			                {
+				                new Request
+				                {
+					                InsertDimension = new InsertDimensionRequest
+					                {
+						                Range = new DimensionRange
+						                {
+							                SheetId = todaySheet.Properties.SheetId,
+							                Dimension = "ROWS",
+							                StartIndex = insertRow,
+							                EndIndex = insertRow + 1
+						                },
+						                InheritFromBefore = true
+					                }
+				                }
+			                }
+						};
+						sheetsService.Spreadsheets.BatchUpdate(expandRequest, _spreadsheetId).Execute();
+					}
+
+					// ---------------------------------------------
+					// 9️⃣ Build new row values
+					// ---------------------------------------------
+
+
+					int currentRowCountForData = todaySheet.Properties.GridProperties.RowCount ?? values.Count;
+					int neededRowIndexForData = insertRow;        // 0-based
+					int neededRowCountForData = neededRowIndexForData + 1; // convert to 1-based
+
+					if (neededRowCountForData > currentRowCountForData)
+					{
+						int rowsToAdd = neededRowCountForData - currentRowCountForData;
+
+						_mainForm.Log($"Sheet has {currentRowCountForData} rows, need {neededRowCountForData}. Inserting {rowsToAdd} more row(s) at bottom for data row...");
+
+						var addRowsForDataRequest = new BatchUpdateSpreadsheetRequest
+						{
+							Requests = new List<Request>
+		                    {
+			                    new Request
+			                    {
+				                    InsertDimension = new InsertDimensionRequest
+				                    {
+					                    Range = new DimensionRange
+					                    {
+						                    SheetId = todaySheet.Properties.SheetId,
+						                    Dimension = "ROWS",
+						                    StartIndex = currentRowCountForData,          // insert after last existing row (0-based)
+                                            EndIndex = currentRowCountForData + rowsToAdd
+					                    },
+					                    InheritFromBefore = true
+				                    }
+			                    }
+		                    }
+						};
+
+						sheetsService.Spreadsheets.BatchUpdate(addRowsForDataRequest, _spreadsheetId).Execute();
+
+						// Update local row count in the sheet object so future checks are correct
+						todaySheet.Properties.GridProperties.RowCount = currentRowCountForData + rowsToAdd;
+						_mainForm.Log($"✅ Inserted {rowsToAdd} row(s) for data. New row count = {todaySheet.Properties.GridProperties.RowCount}.");
+					}
+
+
+					_mainForm.Log("Building new row for insertion...");
+
+					List<object> newRow;
+
+					if (isNotFoundProviderBlock)
+					{
+						// ✅ Provider NOT found → store ONLY the email subject in NOTES column
+						newRow = new List<object>
+	                    {
+		                    (insertRow - startDataRow + 1).ToString(),                         // NO.
+                            "",                                                                // INITIALS
+                            DateTime.Parse(targetDate.ToString()).ToString("MM/dd/yyyy", CultureInfo.InvariantCulture), // DATE
+                            provider ?? "",                                                                // PROVIDER (unknown)
+                            SCRIBETEAM ?? "",                                                                // SCRIBE TEAM
+                            "",                                                                // DOA
+                            "ISG",                                                             // VENDOR
+                            caseNumber ?? "",                                                                // CASE #
+                            "",                                                                // CLAIMANT NAME
+                            "",                                                                // PAGES
+                            Fullsubject ?? "",                                                // NOTES  ⬅️ only this is filled
+                            "",                                                                // DATE SUBMITTED
+                            "",                                                                // TIME SUBMITTED
+                            "",                                                                // YES/NO
+                            ""                                                  // STATUS (you can also leave blank if you prefer)
+                        };
+					}
+					else
+					{
+						// ✅ Provider FOUND → existing full row behavior
+						newRow = new List<object>
+	                    {
+		                    (insertRow - startDataRow + 1).ToString(),                         // NO.
+                            "",                                                                // INITIALS
+                            DateTime.Parse(targetDate.ToString()).ToString("MM/dd/yyyy", CultureInfo.InvariantCulture), // DATE
+                            provider ?? "",                                                    // PROVIDER
+                            SCRIBETEAM ?? "",                                                  // SCRIBE TEAM
+                            incidentDate ?? "",                                                // DOA
+                            "ISG",                                                             // VENDOR
+                            caseNumber ?? "",                                                  // CASE #
+                            claimantName ?? "",                                                // CLAIMANT NAME
+                            pages > 0 ? pages.ToString() : "",                                 // PAGES
+                            "",                                                                // NOTES
+                            "",                                                                // DATE SUBMITTED
+                            "",                                                                // TIME SUBMITTED
+                            "",                                                                // YES/NO
+                            Matchstatus ?? ""                                                  // STATUS
+                        };
+					}
+
+
+					// ---------------------------------------------
+					// 🔟 Insert row
+					// ---------------------------------------------
+					_mainForm.Log($"Inserting new row at {todaySheetName}!A{insertRow + 1}...");
+					string insertRange = $"{todaySheetName}!A{insertRow + 1}";
+					var valueRange = new ValueRange { Values = new List<IList<object>> { newRow } };
+
+					var updateRequest =
+						sheetsService.Spreadsheets.Values.Update(valueRange, _spreadsheetId, insertRange);
+					updateRequest.ValueInputOption =
+						SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
+					updateRequest.Execute();
+
+					_mainForm.Log($"✅ Row inserted at {todaySheetName}!A{insertRow + 1}. Provider = '{provider}' (section may be '{NotFoundTitle}').");
+					_mainForm.HideLoader();
+				}
+				catch (Google.GoogleApiException gEx)
+				{
+					_mainForm.Log($"❌ Google Sheets API Error while reading sheet '{todaySheetName}': {gEx.Message}");
+					_mainForm.HideLoader();
+				}
+
+			}
+			catch (Exception ex)
             {
                 _mainForm.Log($"EPPlus error: {ex.Message}\r\nCheck if the file is a valid Excel format and not open in another program.");
+                _mainForm.HideLoader();
             }
-        }
+		}
 
-        public string GetFolderPrefixFromDrive(DriveService driveService, string providerName = null)
+		public string GetFolderPrefixFromDrive(DriveService driveService, string providerName = null)
         {
             if (driveService == null) throw new ArgumentNullException(nameof(driveService));
 
@@ -1302,7 +1661,7 @@ namespace EmailPDFMatchKeyword
             {
                 string rowText = string.Join(" ", rows[i]);
 
-                if (rowText.Contains("Providers:", StringComparison.OrdinalIgnoreCase))
+                if (rowText.Contains("Providers:", StringComparison.OrdinalIgnoreCase) || rowText.Contains("PRV", StringComparison.OrdinalIgnoreCase))
                 {
                     string provider = "Not Found";
                     var providerMatch = Regex.Match(rowText, @"Providers:\s*(.*?)\s*Dates", RegexOptions.IgnoreCase);
@@ -1312,11 +1671,11 @@ namespace EmailPDFMatchKeyword
                     string date = "Not Found";
                     string charges = "Not Found";
 
-                    var dateMatch = Regex.Match(rowText, @"\b\d{1,2}/\d{1,2}/\d{4}\b"); // only match with '/'
-                    if (dateMatch.Success)
+                    var dateMatch = Regex.Match(rowText, @"\b\d{1,2}/\d{1,2}/\d{2,4}\b"); // only match with '/'
+					if (dateMatch.Success)
                     {
                         string rawDate = dateMatch.Value.Trim();
-                        string[] formats = { "M/d/yyyy", "MM/dd/yyyy" };
+                        string[] formats = { "M/d/yyyy", "MM/dd/yyyy", "MM/dd/yy" };
 
                         if (DateTime.TryParseExact(rawDate, formats, null, System.Globalization.DateTimeStyles.None, out var parsedDate))
                         {
@@ -1335,14 +1694,14 @@ namespace EmailPDFMatchKeyword
                     }
                     if (date == "Not Found" || charges == "Not Found")
                     {
-                        string[] formats = { "M/d/yyyy", "MM/dd/yyyy" };
+                        string[] formats = { "M/d/yyyy", "MM/dd/yyyy", "MM/dd/yy" };
                         for (int j = i + 1; j < Math.Min(i + 5, rows.Count); j++)
                         {
                             rowText = string.Join(" ", rows[j]);
                             if (date == "Not Found")
                             {
-                                var dateMatchNext = Regex.Match(rowText, @"\b\d{1,2}/\d{1,2}/\d{4}\b");
-                                if (dateMatchNext.Success)
+                                var dateMatchNext = Regex.Match(rowText, @"\b\d{1,2}/\d{1,2}/\d{2,4}\b");
+								if (dateMatchNext.Success)
                                 {
                                     string rawDate = dateMatchNext.Value.Trim();
                                     if (DateTime.TryParseExact(rawDate, formats, null, System.Globalization.DateTimeStyles.None, out var parsedDate))
@@ -1374,49 +1733,87 @@ namespace EmailPDFMatchKeyword
             return ("Not Found", "Not Found", "Not Found");
         }
 
-        public string ExtractCaseNumber(List<List<string>> rows)
-        {
-            foreach (var row in rows)
-            {
-                string rowText = string.Join(" ", row).Trim();
+		public string ExtractCaseNumber(List<List<string>> rows)
+		{
+			foreach (var row in rows)
+			{
+				string rowText = string.Join(" ", row).Trim();
 
-                if (rowText.IndexOf("case", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    var match = Regex.Match(rowText, @"Case\s*Number[: ]\s*(\d+)", RegexOptions.IgnoreCase);
-                    if (match.Success)
-                    {
-                        return match.Groups[1].Value; // only the number part
-                    }
-                }
-            }
-            return "Not Found";
-        }
+				// Normalize spaces
+				rowText = Regex.Replace(rowText, @"\s+", " ");
 
-        public string ExtractClientName(List<List<string>> rows)
-        {
-            foreach (var row in rows)
-            {
-                //string rowText = string.Concat(row).Trim(); 
-                string rowText = string.Join(" ", row).Trim();
+				// ✅ 1) Case Number (primary)
+				var caseMatch = Regex.Match(rowText, @"Case\s*Number[:# ]*\s*([A-Za-z0-9\-\/]+)", RegexOptions.IgnoreCase);
 
-                if (rowText.IndexOf("regarding", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    var match = Regex.Match(rowText, @"regarding\s+(.*)", RegexOptions.IgnoreCase);
-                    if (match.Success)
-                    {
-                        string clientName = match.Groups[1].Value.Trim();
+				if (caseMatch.Success)
+				{
+					return caseMatch.Groups[1].Value;
+				}
 
-                        if (clientName.EndsWith("."))
-                            clientName = clientName.Substring(0, clientName.Length - 1);
+				// ✅ 2) ISG / ISF File Number (fallback)
+				var isgMatch = Regex.Match(rowText, @"IS[GF]\s*File\s*#[: ]*\s*([A-Za-z0-9\-\/]+)", RegexOptions.IgnoreCase);
 
-                        return clientName;
-                    }
-                }
-            }
-            return "Not Found";
-        }
+				if (isgMatch.Success)
+				{
+					return isgMatch.Groups[1].Value;
+				}
+			}
 
-        public string ExtractProvider(List<List<string>> rows)
+			return "Not Found";
+		}
+
+		public string ExtractClientName(List<List<string>> rows)
+		{
+			foreach (var row in rows)
+			{
+				string rowText = string.Join(" ", row).Trim();
+
+				// normalize whitespace a bit
+				rowText = Regex.Replace(rowText, @"\s+", " ");
+
+				// 1) Existing logic: "regarding <name>"
+				if (rowText.IndexOf("regarding", StringComparison.OrdinalIgnoreCase) >= 0)
+				{
+					var matchRegarding = Regex.Match(
+						rowText,
+						@"regarding\s+(.+)$",
+						RegexOptions.IgnoreCase);
+
+					if (matchRegarding.Success)
+					{
+						var clientName = matchRegarding.Groups[1].Value.Trim();
+
+						if (clientName.EndsWith("."))
+							clientName = clientName.Substring(0, clientName.Length - 1);
+
+						return clientName;
+					}
+				}
+
+				// 2) New logic: "Claimant Name: <name>   ISG File # ..."
+				if (rowText.IndexOf("claimant name", StringComparison.OrdinalIgnoreCase) >= 0)
+				{
+					var matchClaimant = Regex.Match(
+						rowText,
+						@"Claimant\s*Name[: ]\s*(.+?)(?:\s{2,}|ISG\s*File|Insured:|$)",
+						RegexOptions.IgnoreCase);
+
+					if (matchClaimant.Success)
+					{
+						var clientName = matchClaimant.Groups[1].Value.Trim();
+
+						// strip trailing dot if OCR left one
+						if (clientName.EndsWith("."))
+							clientName = clientName.Substring(0, clientName.Length - 1);
+
+						return clientName;
+					}
+				}
+			}
+			return "Not Found";
+		}
+
+		public string ExtractProvider(List<List<string>> rows)
         {
             foreach (var row in rows)
             {
@@ -1438,33 +1835,44 @@ namespace EmailPDFMatchKeyword
         }
 
         public string ExtractDateOfIncident(List<List<string>> rows)
-        {
-            foreach (var row in rows)
-            {
-                string rowText = string.Join(" ", row).Trim();
+	    {
+		    foreach (var row in rows)
+		    {
+			    string rowText = string.Join(" ", row).Trim();
 
-                if (rowText.IndexOf("incident", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    string date = "Not Found";
-                    var match = Regex.Match(rowText, @"\b\d{1,2}/\d{1,2}/\d{4}\b");
-                    if (match.Success)
-                    {
-                        string rawDate = match.Value.Trim();
+			    // ✅ Trigger on either "incident" OR "Date of Injury"
+			    bool hasIncident =
+				    rowText.IndexOf("incident", StringComparison.OrdinalIgnoreCase) >= 0;
+			    bool hasDateOfInjury =
+				    rowText.IndexOf("date of injury", StringComparison.OrdinalIgnoreCase) >= 0;
 
-                        string[] formats = { "M/d/yyyy", "MM/dd/yyyy" };
+			    if (hasIncident || hasDateOfInjury)
+			    {
+				    string date = "Not Found";
+				    var match = Regex.Match(rowText, @"\b\d{1,2}/\d{1,2}/\d{4}\b");
+				    if (match.Success)
+				    {
+					    string rawDate = match.Value.Trim();
 
-                        if (DateTime.TryParseExact(rawDate, formats, null, System.Globalization.DateTimeStyles.None, out var parsedDate))
-                        {
-                            date = parsedDate.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture);
-                        }
-                        return date;
-                    }
-                }
-            }
-            return "Not Found";
-        }
+					    string[] formats = { "M/d/yyyy", "MM/dd/yyyy" };
 
-        public int GetPdfPageCount_iTextSharp(Stream filePath)
+					    if (DateTime.TryParseExact(
+							    rawDate,
+							    formats,
+							    CultureInfo.InvariantCulture,
+							    DateTimeStyles.None,
+							    out var parsedDate))
+					    {
+						    date = parsedDate.ToString("MM/dd/yyyy", CultureInfo.InvariantCulture);
+					    }
+					    return date;
+				    }
+			    }
+		    }
+		    return "Not Found";
+	    }
+
+	    public int GetPdfPageCount_iTextSharp(Stream filePath)
         {
             var reader = new PdfReader(filePath);
             int pages = reader.NumberOfPages;
@@ -1540,36 +1948,49 @@ namespace EmailPDFMatchKeyword
             return await Task.Run(() => ConvertPdfToImages(pdfStream));
         }
 
-        public List<Bitmap> ConvertPdfToImages(Stream pdfStream)
-        {
-            var images = new List<Bitmap>();
-            var settings = new MagickReadSettings
-            {
-                Density = new Density(500, 500) // high resolution
-            };
 
-            using (var collection = new MagickImageCollection())
-            {
-                collection.Read(pdfStream, settings);
-                foreach (var page in collection)
-                {
-                    page.ColorType = ImageMagick.ColorType.Grayscale;
-                    page.Normalize();
+		public List<Bitmap> ConvertPdfToImages(Stream pdfStream)
+		{
+			var images = new List<Bitmap>();
 
-                    using (var ms = new MemoryStream())
-                    {
-                        page.Write(ms, MagickFormat.Png);
-                        ms.Position = 0;
-                        images.Add(new Bitmap(ms));
-                    }
-                }
-            }
+			// 300 dpi is usually enough; 500 is overkill and slow
+			var settings = new MagickReadSettings
+			{
+				Density = new Density(500, 500)
+			};
 
-            return images;
-        }
+			using (var collection = new MagickImageCollection())
+			{
+				collection.Read(pdfStream, settings);
+
+				foreach (var page in collection)
+				{
+					// Make sure background is white and there is no alpha
+					page.Alpha(AlphaOption.Remove);
+					page.BackgroundColor = MagickColors.White;
+
+					// Convert to grayscale for better OCR
+					page.ColorType = ColorType.Grayscale;
+
+					// Light cleanup
+					page.Deskew(new Percentage(40));          // straighten if skewed
+					page.ContrastStretch(new Percentage(2));  // improve contrast a bit
+					page.Sharpen();                           // sharpen edges
+
+					using (var ms = new MemoryStream())
+					{
+						page.Write(ms, MagickFormat.Png);
+						ms.Position = 0;
+						images.Add(new Bitmap(ms));
+					}
+				}
+			}
+
+			return images;
+		}
 
 
-        public List<List<string>> ExtractTableRowsFromImage_new(Bitmap image)
+		public List<List<string>> ExtractTableRowsFromImage_new(Bitmap image)
         {
             var resultTable = new List<List<string>>();
 
@@ -1664,7 +2085,58 @@ namespace EmailPDFMatchKeyword
             return resultTable;
         }
 
-        public async Task<List<List<string>>> ExtractTableRowsFromImageAsync(Bitmap image)
+		public async Task<List<List<string>>> ExtractTableRowsFromImageAllStateAsync(Bitmap image)
+		{
+			return await Task.Run(() => ExtractTableRowsFromImageAllState(image));
+		}
+
+
+		public List<List<string>> ExtractTableRowsFromImageAllState(Bitmap image)
+		{
+			var tableRows = new List<List<string>>();
+			var lines = new List<string>();
+
+			string tessDataPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata");
+
+			using (var engine = new TesseractEngine(tessDataPath, "eng", EngineMode.LstmOnly))
+			{
+				// Optional: whitelist common characters you expect
+				engine.SetVariable("tessedit_char_whitelist",
+					"0123456789./:$ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-, ");
+
+				using (var ms = new MemoryStream())
+				{
+					image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+					ms.Position = 0;
+
+					using (var pix = Pix.LoadFromMemory(ms.ToArray()))
+					using (var page = engine.Process(pix, PageSegMode.Auto)) // Auto or SingleColumn
+					{
+						var text = page.GetText() ?? string.Empty;
+
+						lines = text
+							.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+							.Select(l => l.Trim())
+							.Where(l => !string.IsNullOrWhiteSpace(l))
+							.ToList();
+					}
+				}
+			}
+
+			// 🔹 Convert each line into a "row" (single cell)
+			foreach (var line in lines)
+			{
+				tableRows.Add(new List<string> { line });
+			}
+
+			return tableRows;
+		}
+
+
+
+
+
+		public async Task<List<List<string>>> ExtractTableRowsFromImageAsync(Bitmap image)
         {
             return await Task.Run(() => ExtractTableRowsFromImage(image));
         }
@@ -1778,229 +2250,349 @@ namespace EmailPDFMatchKeyword
             return from.Date.AddDays(daysToAdd);
         }
 
-        public async Task ProcessAndUploadFilesAsync(string caseNumber, string CLAIMANTNAME, string Status, string PROVIDER, List<(string fileName, byte[] data)> attachments, Google.Apis.Drive.v3.DriveService Driveservices)
-        {
-            try
-            {
 
-                // --- Get current US Eastern Time ---
-                TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
-                DateTime usNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, easternZone);
-                _mainForm.Log($"⏰ Current US (Eastern) time: {usNow}");
+		public async Task ProcessAndUploadFilesAsync(DateTime emailReceivedUtc, string caseNumber, string CLAIMANTNAME, string Status, string PROVIDER, List<(string fileName, byte[] data)> attachments, Google.Apis.Drive.v3.DriveService Driveservices)
+		{
+			try
+			{
+				// --- Get current US Eastern Time ---
+				TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+				DateTime usNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, easternZone);
+				_mainForm.Log($"⏰ Current US (Eastern) time: {usNow}");
 
-                DateTime targetDate = CalculateTargetSheetDate(usNow);
-
-                string today = targetDate.ToString("MM.dd");
-
-                // --- Now create folder after extracting values ---
-                //string today = DateTime.Now.AddDays(1).ToString("MM.dd");
-                string folderName = $"{today} ISG {CleanFileName(caseNumber)} {CleanFileName(CLAIMANTNAME)}";
-                string basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ISG_Messages");
-                string saveFolder = Path.Combine(basePath, folderName);
-
-                try
-                {
-                    _mainForm.ShowLoader();
-                    // Create folder if it doesn't exist
-                    if (!Directory.Exists(saveFolder))
-                    {
-                        Directory.CreateDirectory(saveFolder);
-                        _mainForm.Log($"Folder created: {saveFolder}");
-                    }
-
-                    // --- Test write permission ---
-                    try
-                    {
-                        string testFile = Path.Combine(saveFolder, "test.tmp");
-                        File.WriteAllText(testFile, "test");
-                        File.Delete(testFile);
-                        _mainForm.Log("Write permission test passed.");
-                    }
-                    catch (Exception ex)
-                    {
-                        _mainForm.Log("Permission issue: " + ex.Message);
-                        throw new UnauthorizedAccessException("Cannot write to folder: " + saveFolder, ex);
-                    }
-
-                    // --- Save all attachments safely ---
-                    foreach (var (fileName, data) in attachments)
-                    {
-                        string safeFileName = CleanFileName(fileName);
-                        string filePath = Path.Combine(saveFolder, safeFileName);
-
-                        try
-                        {
-                            // Remove read-only if exists
-                            if (File.Exists(filePath))
-                            {
-                                File.SetAttributes(filePath, FileAttributes.Normal);
-                                File.Delete(filePath);
-                            }
-
-                            // Write file
-                            using (var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
-                            {
-                                fs.Write(data, 0, data.Length);
-                            }
-
-                            _mainForm.Log($"Final saved attachment: {filePath}");
-                        }
-                        catch (Exception ex)
-                        {
-                            _mainForm.Log($"Error saving file '{safeFileName}': {ex.Message}");
-                        }
-                        _mainForm.HideLoader();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _mainForm.Log($"Error in saving attachments: {ex.Message}");
-                }
-
-                // === Upload to Google Drive ===
-
-                //string parentFolderId = "0AOr8Zxx2A1Y6Uk9PVA"; // "2025 Test Peers"
-                string parentFolderId = AppSettingsHelper.Get("GoogleDrive:ParentFolderId");
-                string matchedFolderId = null;
-                string matchedFolderName = null;
-
-                try
-                {
-                    _mainForm.ShowLoader();
-                    // Find subfolders inside parent
-                    var listRequest = Driveservices.Files.List();
-                    listRequest.Q = $"mimeType='application/vnd.google-apps.folder' and trashed=false and '{parentFolderId}' in parents";
-                    listRequest.Fields = "files(id, name, webViewLink)";
-                    listRequest.SupportsAllDrives = true;
-                    listRequest.IncludeItemsFromAllDrives = true;
-
-                    var folderList = await listRequest.ExecuteAsync();
-
-                    if (folderList.Files == null || folderList.Files.Count == 0)
-                    {
-                        _mainForm.Log("❌ No folders found inside parent folder on Drive.");
-                    }
-                    else
-                    {
-                        foreach (var folder in folderList.Files)
-                        {
-                            if (!string.IsNullOrEmpty(PROVIDER) &&
-                                folder.Name.IndexOf(PROVIDER, StringComparison.OrdinalIgnoreCase) >= 0)
-                            {
-                                matchedFolderId = folder.Id;
-                                matchedFolderName = folder.Name;
-                                _mainForm.Log($"Found matching provider folder on Drive: {matchedFolderName}");
-                                break;
-                            }
-                        }
-
-                        if (matchedFolderId == null)
-                            _mainForm.Log($"❌ No matching folder found for provider '{PROVIDER}' in Drive folder.");
-                    }
-                    _mainForm.HideLoader();
-
-                    // === Upload files into matched Drive folder ===
-                    if (matchedFolderId != null)
-                    {
-                        try
-                        {
-                            _mainForm.ShowLoader();
-                            // Determine folder name based on status
-                            string baseFolderName = Path.GetFileName(saveFolder);
-                            string folderNameToCreate = baseFolderName;
-
-                            if (Status == "Not Matched")
-                            {
-                                folderNameToCreate = $"{baseFolderName}_Not Matched";
-                            }
-
-                            // Create subfolder in provider folder
-                            var newFolderMetadata = new Google.Apis.Drive.v3.Data.File()
-                            {
-                                Name = folderNameToCreate, // Use updated folder name here
-                                MimeType = "application/vnd.google-apps.folder",
-                                Parents = new List<string> { matchedFolderId }
-                            };
+				// ✅ NEW: convert emailReceivedUtc to US Eastern
+				DateTime emailReceivedEastern = TimeZoneInfo.ConvertTimeFromUtc(emailReceivedUtc, easternZone);
+				_mainForm.Log($"📧 Email received (UTC):    {emailReceivedUtc:yyyy-MM-dd HH:mm:ss} (UTC)");
+				_mainForm.Log($"📧 Email received (Eastern): {emailReceivedEastern:yyyy-MM-dd HH:mm:ss} (US ET)");
 
 
-                            //// Create subfolder in provider folder
-                            //var newFolderMetadata = new Google.Apis.Drive.v3.Data.File()
-                            //{
-                            //  Name = Path.GetFileName(saveFolder), // e.g. "10.04 ISG 1892104 Tiessa O Lewis"
-                            //  MimeType = "application/vnd.google-apps.folder",
-                            //  Parents = new List<string> { matchedFolderId }
-                            //};
-
-                            var createFolderRequest = Driveservices.Files.Create(newFolderMetadata);
-                            createFolderRequest.Fields = "id, name, webViewLink";
-                            createFolderRequest.SupportsAllDrives = true;
-
-                            var createdFolder = await createFolderRequest.ExecuteAsync();
-                            string createdFolderId = createdFolder.Id;
-
-                            _mainForm.Log($"Created subfolder '{createdFolder.Name}' under provider folder '{matchedFolderName}'");
-
-                            // Upload all files inside this saveFolder into the new Drive folder
-                            foreach (var filePath in Directory.GetFiles(saveFolder))
-                            {
-                                try
-                                {
-                                    var fileName = Path.GetFileName(filePath);
-                                    var fileMetadata = new Google.Apis.Drive.v3.Data.File()
-                                    {
-                                        Name = fileName,
-                                        Parents = new List<string> { createdFolderId } // Upload into subfolder
-                                    };
-
-                                    using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read))
-                                    {
-                                        var uploadRequest = Driveservices.Files.Create(fileMetadata, stream, GetMimeType(filePath));
-                                        uploadRequest.Fields = "id, name, webViewLink";
-                                        uploadRequest.SupportsAllDrives = true;
-
-                                        var progress = await uploadRequest.UploadAsync();
-
-                                        if (progress.Status == Google.Apis.Upload.UploadStatus.Failed)
-                                        {
-                                            _mainForm.Log($"❌ Upload failed for '{fileName}': {progress.Exception?.Message}");
-                                            continue;
-                                        }
-
-                                        var uploadedFile = uploadRequest.ResponseBody;
-                                        if (uploadedFile != null && !string.IsNullOrEmpty(uploadedFile.Id))
-                                        {
-                                            string fileUrl = uploadedFile.WebViewLink ?? $"https://drive.google.com/file/d/{uploadedFile.Id}/view";
-                                            _mainForm.Log($"Uploaded '{fileName}' → Subfolder '{createdFolder.Name}'");
-                                            _mainForm.Log($"File URL: {fileUrl}");
-                                            _mainForm.HideLoader();
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    _mainForm.Log($"❌ Error uploading file '{filePath}': {ex.Message}");
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _mainForm.Log($"❌ Error creating/uploading folder '{saveFolder}': {ex.Message}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _mainForm.Log($"❌ Google Drive error: {ex.Message}");
-                }
-            }
-            catch (Exception ex)
-            {
-                _mainForm.Log($"❌ Error in ProcessAndUploadFilesAsync: {ex.Message}");
-            }
-        }
+				// ✅ Use *emailReceivedEastern* for your existing sheet-date logic
+				DateTime targetDate = CalculateTargetSheetDate(emailReceivedEastern);
+				string today = targetDate.ToString("MM.dd");
 
 
-        public async Task<Dictionary<string, (int Matched, int NotMatched)>> MatchAndNotMatchRecordCountAsync(string sheetName)
+				//DateTime targetDate = CalculateTargetSheetDate(usNow);
+				//string today = targetDate.ToString("MM.dd");
+
+				// --- Build local folder path ---
+				string folderName = $"{today} ISG {CleanFileName(caseNumber)} {CleanFileName(CLAIMANTNAME)}";
+				string basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ISG_Messages");
+				string saveFolder = Path.Combine(basePath, folderName);
+
+				// =========================
+				// 1) SAVE ATTACHMENTS LOCALLY
+				// =========================
+				try
+				{
+					_mainForm.ShowLoader();
+
+					// Create folder if it doesn't exist
+					if (!Directory.Exists(saveFolder))
+					{
+						Directory.CreateDirectory(saveFolder);
+						_mainForm.Log($"Folder created: {saveFolder}");
+					}
+
+					// --- Test write permission ---
+					try
+					{
+						string testFile = Path.Combine(saveFolder, "test.tmp");
+						File.WriteAllText(testFile, "test");
+						File.Delete(testFile);
+						_mainForm.Log("Write permission test passed.");
+					}
+					catch (Exception ex)
+					{
+						_mainForm.Log("Permission issue: " + ex.Message);
+						throw new UnauthorizedAccessException("Cannot write to folder: " + saveFolder, ex);
+					}
+
+					// --- Save all attachments safely ---
+					foreach (var (fileName, data) in attachments)
+					{
+						string safeFileName = CleanFileName(fileName);
+						string filePath = Path.Combine(saveFolder, safeFileName);
+
+						try
+						{
+							// Remove read-only if exists
+							if (File.Exists(filePath))
+							{
+								File.SetAttributes(filePath, FileAttributes.Normal);
+								File.Delete(filePath);
+							}
+
+							// Write file
+							using (var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
+							{
+								fs.Write(data, 0, data.Length);
+							}
+
+							_mainForm.Log($"Final saved attachment: {filePath}");
+						}
+						catch (Exception ex)
+						{
+							_mainForm.Log($"Error saving file '{safeFileName}': {ex.Message}");
+						}
+					}
+					_mainForm.HideLoader();
+				}
+				catch (Exception ex)
+				{
+					_mainForm.Log($"Error in saving attachments: {ex.Message}");
+					_mainForm.HideLoader();
+				}
+
+				string parentFolderId = AppSettingsHelper.Get("GoogleDrive:ParentFolderId");
+				if (string.IsNullOrWhiteSpace(parentFolderId))
+				{
+					_mainForm.Log("❌ GoogleDrive:ParentFolderId not configured or empty. Skipping Drive upload.");
+					return;
+				}
+				string matchedFolderId = null;
+				string matchedFolderName = null;
+
+				try
+				{
+					_mainForm.ShowLoader();
+
+					// Find subfolders inside parent
+					var listRequest = Driveservices.Files.List();
+					listRequest.Q = $"mimeType='application/vnd.google-apps.folder' and trashed=false and '{parentFolderId}' in parents";
+					listRequest.Fields = "files(id, name, webViewLink)";
+					listRequest.SupportsAllDrives = true;
+					listRequest.IncludeItemsFromAllDrives = true;
+
+					var folderList = await listRequest.ExecuteAsync();
+
+					if (folderList.Files == null || folderList.Files.Count == 0)
+					{
+						_mainForm.Log("❌ No folders found inside parent folder on Drive.");
+					}
+					else
+					{
+						foreach (var folder in folderList.Files)
+						{
+							if (!string.IsNullOrEmpty(PROVIDER) && folder.Name.IndexOf(PROVIDER, StringComparison.OrdinalIgnoreCase) >= 0)
+							{
+								matchedFolderId = folder.Id;
+								matchedFolderName = folder.Name;
+								_mainForm.Log($"Found matching provider folder on Drive: {matchedFolderName}");
+								break;
+							}
+						}
+
+						// 🔑 CHANGE 3: Proper check for not-found
+						if (string.IsNullOrEmpty(matchedFolderId))
+						{
+							_mainForm.Log($"❌ No matching folder found for provider '{PROVIDER}' in Drive parent '{parentFolderId}'.");
+						}
+						//if (matchedFolderId == null)
+						//	_mainForm.Log($"❌ No matching folder found for provider '{PROVIDER}' in Drive folder.");
+					}
+
+					_mainForm.HideLoader();
+
+					// =========================
+					// 3) UPLOAD FILES INTO MATCHED PROVIDER FOLDER
+					// =========================
+
+					//if (matchedFolderId != null)
+                    if (!string.IsNullOrEmpty(matchedFolderId))
+					{
+						try
+						{
+							_mainForm.ShowLoader();
+
+							// 🔍 NEW PART: CHECK IF CASE FOLDER ALREADY EXISTS UNDER THIS PROVIDER
+							if (!string.IsNullOrWhiteSpace(caseNumber))
+							{
+								var subListReq = Driveservices.Files.List();
+								subListReq.Q =
+									$"mimeType='application/vnd.google-apps.folder' and trashed=false and '{matchedFolderId}' in parents";
+								subListReq.Fields = "files(id, name)";
+								subListReq.SupportsAllDrives = true;
+								subListReq.IncludeItemsFromAllDrives = true;
+
+								var subListResp = await subListReq.ExecuteAsync();
+								var existingFolders = subListResp.Files ?? new List<Google.Apis.Drive.v3.Data.File>();
+
+								var existingCaseFolder = existingFolders
+									.FirstOrDefault(f =>
+										!string.IsNullOrEmpty(f.Name) &&
+										f.Name.IndexOf(caseNumber, StringComparison.OrdinalIgnoreCase) >= 0);
+
+								if (existingCaseFolder != null)
+								{
+									_mainForm.Log($"📁 Folder already exists for Case #{caseNumber} under provider '{matchedFolderName}'.");
+									_mainForm.Log($"Existing folder name: {existingCaseFolder.Name}");
+									_mainForm.Log("⏩ Skipping folder creation and file uploads for this case.");
+
+									_mainForm.HideLoader();
+									return; // ⛔ STOP: do not create or upload for this case
+								}
+							}
+							else
+							{
+								_mainForm.Log("⚠ Case number is empty; skipping case-folder duplication check.");
+							}
+
+							// If we reach here, no folder for this case exists yet.
+							// Determine folder name based on status
+							string baseFolderName = Path.GetFileName(saveFolder); // e.g. "10.04 ISG 1892104 Tiessa O Lewis"
+							string folderNameToCreate = baseFolderName;
+
+							if (Status == "Not Matched")
+							{
+								folderNameToCreate = $"{baseFolderName}_Not Matched";
+							}
+
+							// Create subfolder in provider folder
+							var newFolderMetadata = new Google.Apis.Drive.v3.Data.File()
+							{
+								Name = folderNameToCreate,
+								MimeType = "application/vnd.google-apps.folder",
+								Parents = new List<string> { matchedFolderId }
+							};
+
+							_mainForm.Log($"Creating Drive subfolder '{folderNameToCreate}' under provider '{matchedFolderName}' (ParentId={matchedFolderId})...");
+
+							var createFolderRequest = Driveservices.Files.Create(newFolderMetadata);
+							createFolderRequest.Fields = "id, name, webViewLink";
+							createFolderRequest.SupportsAllDrives = true;
+
+							var createdFolder = await createFolderRequest.ExecuteAsync();
+							string createdFolderId = createdFolder.Id;
+
+							_mainForm.Log($"✅ Created subfolder '{createdFolder.Name}' under provider folder '{matchedFolderName}'");
+
+							// Upload all files inside this saveFolder into the new Drive folder
+							foreach (var filePath in Directory.GetFiles(saveFolder))
+							{
+								var fileName = Path.GetFileName(filePath);
+
+								// Max 3 attempts per file
+								const int maxAttempts = 3;
+								int attempt = 0;
+								bool success = false;
+
+								while (attempt < maxAttempts && !success)
+								{
+									attempt++;
+
+									try
+									{
+										_mainForm.Log($"📤 [{attempt}/{maxAttempts}] Uploading '{fileName}'...");
+
+										var fileMetadata = new Google.Apis.Drive.v3.Data.File
+										{
+											Name = fileName,
+											Parents = new List<string> { createdFolderId } // Upload into subfolder
+										};
+
+										using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+										{
+											var uploadRequest = Driveservices.Files.Create(fileMetadata, stream, GetMimeType(filePath));
+											uploadRequest.Fields = "id, name, webViewLink";
+											uploadRequest.SupportsAllDrives = true;
+
+											var progress = await uploadRequest.UploadAsync();
+
+											if (progress.Status == Google.Apis.Upload.UploadStatus.Failed)
+											{
+												var ex = progress.Exception;
+												_mainForm.Log($"❌ Upload failed for '{fileName}' on attempt {attempt}: {ex?.Message}");
+
+												// Agar GoogleApiException hai to status code bhi log karein
+												if (ex is Google.GoogleApiException gex)
+												{
+													_mainForm.Log($"   ↳ HTTP Status: {gex.HttpStatusCode}, Errors: {gex.Error?.Message}");
+												}
+
+												// Transient error ho sakta hai → next attempt (thoda wait)
+												if (attempt < maxAttempts)
+												{
+													await Task.Delay(TimeSpan.FromSeconds(3));
+													continue;
+												}
+
+												// Max attempts complete → hard fail
+												_mainForm.Log($"🚫 Giving up on '{fileName}' after {maxAttempts} failed attempts.");
+												break;
+											}
+
+											// ✅ Success
+											var uploadedFile = uploadRequest.ResponseBody;
+											if (uploadedFile != null && !string.IsNullOrEmpty(uploadedFile.Id))
+											{
+												string fileUrl = uploadedFile.WebViewLink ??
+																 $"https://drive.google.com/file/d/{uploadedFile.Id}/view";
+
+												_mainForm.Log($"✅ Uploaded '{fileName}' → Subfolder '{createdFolder.Name}'");
+												_mainForm.Log($"🔗 File URL: {fileUrl}");
+											}
+
+											success = true;
+										}
+									}
+									catch (HttpRequestException httpEx)
+									{
+										_mainForm.Log($"🌐 HTTP error while uploading '{fileName}' on attempt {attempt}: {httpEx.Message}");
+
+										if (attempt < maxAttempts)
+										{
+											await Task.Delay(TimeSpan.FromSeconds(3));
+											continue;
+										}
+
+										_mainForm.Log($"🚫 Giving up on '{fileName}' after {maxAttempts} HTTP failures.");
+									}
+									catch (IOException ioEx)
+									{
+										_mainForm.Log($"💾 IO error while uploading '{fileName}': {ioEx.Message} (file locked/missing?)");
+										// IO error usually local issue, retry optional – yahan ek hi attempt enough
+										break;
+									}
+									catch (Exception ex)
+									{
+										_mainForm.Log($"❌ Unexpected error uploading file '{filePath}' on attempt {attempt}: {ex.Message}");
+
+										if (attempt < maxAttempts)
+										{
+											await Task.Delay(TimeSpan.FromSeconds(2));
+											continue;
+										}
+
+										_mainForm.Log($"🚫 Giving up on '{fileName}' after {maxAttempts} unexpected failures.");
+									}
+								}
+							}
+
+							_mainForm.HideLoader();
+
+						}
+						catch (Exception ex)
+						{
+							_mainForm.Log($"❌ Error creating/uploading folder '{saveFolder}': {ex.Message}");
+							_mainForm.HideLoader();
+						}
+					}
+				}
+				catch (Exception ex)
+				{
+					_mainForm.Log($"❌ Google Drive error: {ex.Message}");
+					_mainForm.HideLoader();
+				}
+			}
+			catch (Exception ex)
+			{
+				_mainForm.Log($"❌ Error in ProcessAndUploadFilesAsync: {ex.Message}");
+				_mainForm.HideLoader();
+			}
+		}
+
+
+		public async Task<Dictionary<string, (int Matched, int NotMatched)>> MatchAndNotMatchRecordCountAsync(string sheetName)
         {
             var result = new Dictionary<string, (int Matched, int NotMatched)>(StringComparer.OrdinalIgnoreCase)
             {
@@ -2187,25 +2779,25 @@ namespace EmailPDFMatchKeyword
             _mainForm.Log("✅ Match/NotMatch summary email sent successfully.");
         }
 
-        public async Task CalculateAndSendEmailAsync()
+        public async Task CalculateAndSendEmailAsync(string targetSheetNameToProcess)
         {
-            await Task.Run(() => CalculateAndSendEmail());
+            await Task.Run(() => CalculateAndSendEmail(targetSheetNameToProcess));
         }
 
-        public async Task CalculateAndSendEmail()
+        public async Task CalculateAndSendEmail(string targetSheetNameToProcess)
         {
             _mainForm.ShowLoader();
-            TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
-            DateTime usNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, easternZone);
-            _mainForm.Log($"⏰ Current US (Eastern) time: {usNow}");
+            //TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+            //DateTime usNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, easternZone);
+            //_mainForm.Log($"⏰ Current US (Eastern) time: {usNow}");
 
-            DateTime targetDate = CalculateTargetSheetDate(usNow);
-            string todaySheetName = targetDate.ToString("MM/dd", CultureInfo.InvariantCulture);
+            //DateTime targetDate = CalculateTargetSheetDate(usNow);
+            //string todaySheetName = targetDate.ToString("MM/dd", CultureInfo.InvariantCulture);
 
-            _mainForm.Log($"📄 Target sheet date selected: {todaySheetName}");
+            _mainForm.Log($"📄 Target sheet date selected: {targetSheetNameToProcess}");
 
             // Step 3: Always process the previous *working day’s* sheet
-            string targetSheetNameToProcess = GetPreviousWorkingDaySheetName(targetDate);
+            //string targetSheetNameToProcess = GetPreviousWorkingDaySheetName(targetDate);
             _mainForm.Log($"📊 Processing previous working day sheet: {targetSheetNameToProcess}");
 
             //// Check if it's after 5 PM
@@ -2433,7 +3025,5 @@ namespace EmailPDFMatchKeyword
             }
             return name;
         }
-
-
     }
 }
