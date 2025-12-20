@@ -12,6 +12,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Tesseract;
+using CellFormat = Google.Apis.Sheets.v4.Data.CellFormat;
+using Color = Google.Apis.Sheets.v4.Data.Color;
 using ColorType = ImageMagick.ColorType;
 
 namespace EmailPDFMatchKeyword
@@ -482,8 +484,22 @@ namespace EmailPDFMatchKeyword
 					// ---------------------------------------------
 					_mainForm.Log("Finding insert position within section...");
 
+                    string vendor = "ISG";
 					int insertRow = -1;
 					int providerRecordCount = 0;
+					const int PROVIDER_COL = 3; 
+					const int VENDOR_COL = 6;
+
+					bool insertBlankRow = false;
+					bool insertColorSeparatorRow = false;
+
+					int lastDataRow = -1;
+					string lastProvider = null;
+					string lastVendor = null;
+
+					string currentProvider = provider ?? "";
+					string currentVendor = vendor ?? "";
+
 
 					if (isNewSectionCreated)
 					{
@@ -498,25 +514,48 @@ namespace EmailPDFMatchKeyword
 							var row = values[r];
 							string rowText = string.Join(" ", row).ToUpperInvariant();
 
-							// If the row contains another provider's name or the special block name,
-							// it marks the start of a different section.
+							// stop at next provider section
 							if (!string.IsNullOrWhiteSpace(rowText) &&
 								knownProviders.Any(p => rowText.Contains(p)))
-							{
-								insertRow = r; // insert before next section
 								break;
-							}
 
-							bool isEmpty = row.All(cell => string.IsNullOrWhiteSpace(cell?.ToString()));
-							if (!isEmpty)
+							bool isEmpty = row.All(c => string.IsNullOrWhiteSpace(c?.ToString()));
+							if (isEmpty)
+								break;
+
+							providerRecordCount++;
+
+							lastDataRow = r;
+
+							if (row.Count > VENDOR_COL)
 							{
-								providerRecordCount++;
+								lastProvider = row[PROVIDER_COL]?.ToString();
+								lastVendor = row[VENDOR_COL]?.ToString();
+							}
+						}
+						if (lastDataRow != -1)
+						{
+							// CONDITION 1: Same provider, vendor different
+							if (string.Equals(lastProvider, currentProvider, StringComparison.OrdinalIgnoreCase) &&
+								!string.Equals(lastVendor, currentVendor, StringComparison.OrdinalIgnoreCase))
+							{
+								insertBlankRow = true;
+								insertRow = lastDataRow + 1;
+							}
+							// CONDITION 2: Provider changed
+							else if (!string.Equals(lastProvider, currentProvider, StringComparison.OrdinalIgnoreCase))
+							{
+								insertColorSeparatorRow = true;
+								insertRow = lastDataRow + 1;
 							}
 							else
 							{
-								insertRow = r;
-								break;
+								insertRow = lastDataRow + 1;
 							}
+						}
+						else
+						{
+							insertRow = startDataRow;
 						}
 
 						// If no empty row or new section found, append at end
@@ -524,8 +563,8 @@ namespace EmailPDFMatchKeyword
 							insertRow = values.Count;
 					}
 
-					// ✅ If section already has 20 records, expand by inserting a blank row
-					if (!isNewSectionCreated && providerRecordCount >= 20)
+					// ✅ If section already has 5 records, expand by inserting a blank row
+					if (!isNewSectionCreated && providerRecordCount >= 5)
 					{
 						_mainForm.Log($"Section has {providerRecordCount} records. Expanding by inserting a new blank row...");
 						var expandRequest = new BatchUpdateSpreadsheetRequest
@@ -549,6 +588,104 @@ namespace EmailPDFMatchKeyword
 			                }
 						};
 						sheetsService.Spreadsheets.BatchUpdate(expandRequest, _spreadsheetId).Execute();
+					}
+					if (insertBlankRow)
+					{
+						_mainForm.Log("Vendor changed — inserting blank row...");
+
+						var blankRowRequest = new BatchUpdateSpreadsheetRequest
+						{
+							Requests = new List<Request>
+		                    {
+			                    new Request
+			                    {
+				                    InsertDimension = new InsertDimensionRequest
+				                    {
+					                    Range = new DimensionRange
+					                    {
+						                    SheetId = todaySheet.Properties.SheetId,
+						                    Dimension = "ROWS",
+						                    StartIndex = insertRow,
+						                    EndIndex = insertRow + 1
+					                    },
+					                    InheritFromBefore = true
+				                    }
+			                    }
+		                    }
+						};
+
+						sheetsService.Spreadsheets.BatchUpdate(blankRowRequest, _spreadsheetId).Execute();
+
+						insertRow++; // 🔴 VERY IMPORTANT
+					}
+
+					if (insertColorSeparatorRow)
+					{
+						_mainForm.Log("Provider changed — inserting colored separator row...");
+
+						// Insert row
+						sheetsService.Spreadsheets.BatchUpdate(
+							new BatchUpdateSpreadsheetRequest
+							{
+								Requests = new List<Request>
+								{
+				                    new Request
+				                    {
+					                    InsertDimension = new InsertDimensionRequest
+					                    {
+						                    Range = new DimensionRange
+						                    {
+							                    SheetId = todaySheet.Properties.SheetId,
+							                    Dimension = "ROWS",
+							                    StartIndex = insertRow,
+							                    EndIndex = insertRow + 1
+						                    },
+						                    InheritFromBefore = true
+					                    }
+				                    }
+								}
+							},
+							_spreadsheetId
+						).Execute();
+
+						// Apply color
+						sheetsService.Spreadsheets.BatchUpdate(
+							new BatchUpdateSpreadsheetRequest
+							{
+								Requests = new List<Request>
+								{
+				                    new Request
+				                    {
+					                    RepeatCell = new RepeatCellRequest
+					                    {
+						                    Range = new GridRange
+						                    {
+							                    SheetId = todaySheet.Properties.SheetId,
+							                    StartRowIndex = insertRow,
+							                    EndRowIndex = insertRow + 1
+						                    },
+						                    Cell = new CellData
+						                    {
+							                    UserEnteredFormat = new CellFormat
+							                    {
+													BackgroundColor = new Color
+                                                    {
+	                                                    Red = 0.56f,
+	                                                    Green = 0.77f,
+	                                                    Blue = 0.49f
+                                                    }
+
+												}
+											},
+						                    Fields = "userEnteredFormat.backgroundColor"
+					                    }
+				                    }
+								}
+							},
+							_spreadsheetId
+						).Execute();
+
+						insertRow++; // 🔴 VERY IMPORTANT
 					}
 
 					// ---------------------------------------------
@@ -610,7 +747,7 @@ namespace EmailPDFMatchKeyword
                             provider ?? "",                                                                // PROVIDER (unknown)
                             SCRIBETEAM ?? "",                                                                // SCRIBE TEAM
                             "",                                                                // DOA
-                            "ISG",                                                             // VENDOR
+                            vendor ?? "",                                                             // VENDOR
                             caseNumber ?? "",                                                                // CASE #
                             "",                                                                // CLAIMANT NAME
                             "",                                                                // PAGES
@@ -632,7 +769,7 @@ namespace EmailPDFMatchKeyword
                             provider ?? "",                                                    // PROVIDER
                             SCRIBETEAM ?? "",                                                  // SCRIBE TEAM
                             incidentDate ?? "",                                                // DOA
-                            "ISG",                                                             // VENDOR
+                            vendor ?? "",                                                             // VENDOR
                             caseNumber ?? "",                                                  // CASE #
                             claimantName ?? "",                                                // CLAIMANT NAME
                             pages > 0 ? pages.ToString() : "",                                 // PAGES
