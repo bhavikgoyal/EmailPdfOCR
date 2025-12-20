@@ -699,19 +699,32 @@ namespace EmailPDFMatchKeyword
                     return;
                 }
 
-				var localNow = DateTime.Now;              // local machine time (same as your "current date")
-				var lastDayLocal = localNow.Date;         // today at 00:00 (local)
-				var firstDayLocal = lastDayLocal.AddDays(-2); // 3-day window start at 00:00 (local)
+				//var localNow = DateTime.Now;              // local machine time (same as your "current date")
+				////var lastDayLocal = localNow.Date;         // today at 00:00 (local)
+				////var firstDayLocal = lastDayLocal.AddDays(-2); // 3-day window start at 00:00 (local)
+				//var windowStartLocal = localNow.AddDays(-2); // ✅ last 24 hours
 
-				// For Gmail "after:" we need UTC epoch seconds
-				var windowStartUtc = firstDayLocal.ToUniversalTime();   // 3 days ago at local midnight -> UTC
-				long epochWindowStart = new DateTimeOffset(windowStartUtc).ToUnixTimeSeconds();
+				//// For Gmail "after:" we need UTC epoch seconds
+				//var windowStartUtc = windowStartLocal.ToUniversalTime();  // 3 days ago at local midnight -> UTC
+				//long epochWindowStart = new DateTimeOffset(windowStartUtc).ToUnixTimeSeconds();
 
-				Log($"🔎 Fetching unread threads with messages after {firstDayLocal:d} (local full-day start).");
+				var localNow = DateTime.UtcNow;
+
+				// Start of day 2 days ago (UTC)
+				//var windowStartLocal = localNow.Date.AddDays(-2);
+				var windowStartLocal = localNow.Date.AddHours(-48);
+				long epochWindowStart = new DateTimeOffset(windowStartLocal).ToUnixTimeSeconds();
+
+				Log($"🔎 Fetching unread messages after {windowStartLocal:u} (UTC)");
+
+				//Log($"🔎 Fetching unread threads with messages after {windowStartLocal:d} (local time).");
 
 				// 1) Get unread threads with at least one message after the window start
 				var request = service.Users.Threads.List("me");
-				request.Q = $"in:inbox is:unread after:{epochWindowStart}";
+                request.Q = $"in:inbox is:unread after:{epochWindowStart} "  + 
+                    "(filename:pdf OR filename:doc OR filename:docx)";
+
+				request.IncludeSpamTrash = false;
 
 				var allThreads = new List<Google.Apis.Gmail.v1.Data.Thread>();
 				string pageToken = null;
@@ -743,7 +756,6 @@ namespace EmailPDFMatchKeyword
 
                 Log($"📨 Loaded {fifoMessages.Count} unread threads for processing.");
 
-
 				int processedEmails = 0;
 
 
@@ -771,19 +783,39 @@ namespace EmailPDFMatchKeyword
 						}
 
 						// SCENARIO 1: inspect ALL messages in the thread
+
+						bool threadHasAtLeastTwoUnreadValidAttachments = fullThread.Messages.Any(m =>
+	                            m.LabelIds != null &&
+	                            m.LabelIds.Contains("UNREAD") &&
+	                            m.Payload?.Parts != null &&
+	                            m.Payload.Parts.Count(p =>
+		                            !string.IsNullOrEmpty(p.Filename) &&
+		                            (
+			                            p.Filename.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||
+			                            p.Filename.EndsWith(".doc", StringComparison.OrdinalIgnoreCase) ||
+			                            p.Filename.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
+		                            )
+	                            ) >= 2
+                            );
+
+						if (!threadHasAtLeastTwoUnreadValidAttachments)
+						{
+							Log($"⏩ Thread {msgItem.Id} skipped (less than 2 UNREAD PDF/DOC/DOCX attachments).");
+							continue;
+						}
+
 						var messageInfos = fullThread.Messages
-							.Select(m =>
-							{
-								var (utc, local) = GetMessageReceivedDate(m);
-								return new
-								{
-									Message = m,
-									Utc = utc,
-									Local = local,
-									LocalDate = local.Date
-								};
-							})
-							.ToList();
+	                        .Select(m =>
+	                        {
+		                        var (utc, local) = GetMessageReceivedDate(m);
+		                        return new
+		                        {
+			                        Message = m,
+			                        Utc = utc,
+			                        Local = local
+		                        };
+	                        })
+	                        .ToList();
 
 						var threadLocalDates = messageInfos.Select(i => i.Local).ToList();
 						DateTime? threadOldestLocal = threadLocalDates.Count > 0 ? threadLocalDates.Min() : (DateTime?)null;
@@ -800,8 +832,15 @@ namespace EmailPDFMatchKeyword
 						}
 
 						// SCENARIO 2: check if ANY message in thread is in the last 3 full local days
-						bool anyMessageInWindow = messageInfos
-							.Any(i => i.LocalDate >= firstDayLocal && i.LocalDate <= lastDayLocal);
+						//bool anyMessageInWindow = messageInfos
+						//	.Any(i => i.Local >= windowStartLocal && i.Local <= localNow);
+
+						bool anyMessageInWindow = messageInfos.Any(i =>
+	                            i.Message.LabelIds != null &&
+	                            i.Message.LabelIds.Contains("UNREAD") &&
+	                            i.Local >= windowStartLocal &&
+	                            i.Local <= localNow);
+
 
 						if (!anyMessageInWindow)
 						{
@@ -817,13 +856,13 @@ namespace EmailPDFMatchKeyword
 
 						// 3) Select unread messages that fall inside the 3 full days window
 						var unreadMessagesInWindow = messageInfos
-							.Where(i =>
-								i.Message.LabelIds != null &&
-								i.Message.LabelIds.Contains("UNREAD") &&
-								i.LocalDate >= firstDayLocal &&
-								i.LocalDate <= lastDayLocal)
-							.OrderBy(i => i.Local) // oldest to newest
-							.ToList();
+	                        .Where(i =>
+		                        i.Message.LabelIds != null &&
+		                        i.Message.LabelIds.Contains("UNREAD") &&
+		                        i.Local >= windowStartLocal &&
+		                        i.Local <= localNow)
+	                        .OrderBy(i => i.Local)
+	                        .ToList();
 
 						if (unreadMessagesInWindow.Count == 0)
 						{
@@ -870,8 +909,28 @@ namespace EmailPDFMatchKeyword
 
 							var parts = message.Payload.Parts ?? new List<MessagePart>();
 
-							foreach (var part in parts)
+
+							var validAttachmentParts = parts
+	                            .Where(p =>
+		                            !string.IsNullOrEmpty(p.Filename) &&
+		                            p.Body?.AttachmentId != null &&
+		                            (
+			                            p.Filename.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||
+			                            p.Filename.EndsWith(".doc", StringComparison.OrdinalIgnoreCase) ||
+			                            p.Filename.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
+		                            )
+	                            )
+	                            .ToList();
+
+							if (validAttachmentParts.Count < 2)
+							{
+								Log("⏩ Email skipped (less than 2 PDF/DOC/DOCX attachments).");
+								continue; // 🔑 NO Attachments.Get API call
+							}
+
+							//foreach (var part in parts)
 							//foreach (var part in message.Payload.Parts ?? new List<MessagePart>())
+							foreach (var part in validAttachmentParts)
 							{
 								// Only real attachments: has filename + attachment id
 								if (string.IsNullOrEmpty(part.Filename) || part.Body == null || string.IsNullOrEmpty(part.Body.AttachmentId))
@@ -881,7 +940,6 @@ namespace EmailPDFMatchKeyword
 
 								string attachId = part.Body.AttachmentId;
 
-								// IMPORTANT: use message.Id here, NOT thread id
 								var attach = await service.Users.Messages.Attachments
 									.Get("me", message.Id, attachId)
 									.ExecuteAsync(cancellationToken);
@@ -1380,19 +1438,26 @@ namespace EmailPDFMatchKeyword
 
                                     Log($"Values are Not Match Email subject: {subject} Process Completed.");
                                 }
+
                                 Log("======================================================");
                                 Log($"Email :-: \"{subject}\" Process will completed............");
                                 Log("======================================================");
-                            }
+
+								await Task.Delay(TimeSpan.FromSeconds(20), cancellationToken);
+								Log($"Delay for some time to avoid API Traffic Issue second :- 20.");
+							}
                             else
                             {
                                 Log("======================================================");
                                 Log($"Email :-: \"{subject}\" has not found the Dr.Name \"{PROVIDER}\" . Cannot proceed with this Email.");
                                 Log("======================================================");
-                            }
-                        }
 
-						processedEmails++;
+								await Task.Delay(TimeSpan.FromSeconds(20), cancellationToken);
+								Log($"Delay for some time to avoid API Traffic Issue second :- 20.");
+							}
+							
+							processedEmails++;
+						}
 					}
                     catch (Exception ex)
                     {
@@ -1406,6 +1471,8 @@ namespace EmailPDFMatchKeyword
                     }
                     HideLoader();
 					Log($"📬 Poll cycle finished. Processed {processedEmails} email(s).");
+					 await Task.Delay(TimeSpan.FromSeconds(20), cancellationToken);
+					Log($"Delay for some time to avoid API Traffic Issue second :- 20.");
 
 				}
 				Log("Mailbox polling completed.");
