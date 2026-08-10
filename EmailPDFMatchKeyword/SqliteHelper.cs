@@ -81,7 +81,8 @@ namespace EmailPDFMatchKeyword
             cmd.Parameters.AddWithValue("@Initials", DBNull.Value);
             cmd.Parameters.AddWithValue("@Date", targetDate);
             cmd.Parameters.AddWithValue("@Provider", provider);
-            cmd.Parameters.AddWithValue("@ScribeTeam", scribeTeam);
+            //cmd.Parameters.AddWithValue("@ScribeTeam", scribeTeam);
+            cmd.Parameters.AddWithValue("@ScribeTeam",scribeTeam == null ? DBNull.Value : (object)scribeTeam);
             cmd.Parameters.AddWithValue("@DOA", incidentDate);
             cmd.Parameters.AddWithValue("@Vendor", "ISG");
             cmd.Parameters.AddWithValue("@CaseNumber", caseNumber);
