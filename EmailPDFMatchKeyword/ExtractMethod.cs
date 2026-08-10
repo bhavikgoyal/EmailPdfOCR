@@ -7,6 +7,7 @@ using Google.Apis.Sheets.v4.Data;
 using ImageMagick;
 using iTextSharp.text.pdf;
 using Microsoft.Extensions.Configuration;
+using Org.BouncyCastle.Utilities.Encoders;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -20,6 +21,9 @@ namespace EmailPDFMatchKeyword
 {
     public class ExtractMethod
     {
+        // STATIC processing anchor date (do not change)
+        public static readonly DateTime ProcessingStartDate = new DateTime(2026, 8, 6);
+
         private MainForm _mainForm;
         public ExtractMethod(MainForm mainForm)
         {
@@ -39,13 +43,13 @@ namespace EmailPDFMatchKeyword
 
 
 
-		public async Task InsertDataIntoSheetORDataBase( string provider, string caseNumber, string claimantName, DateTime emailReceivedUtc,  string incidentDate, int pages, string Matchstatus, string SCRIBETEAM, string Fullsubject)
+        public async Task<bool> InsertDataIntoSheetORDataBase( string provider, string caseNumber, string claimantName, DateTime emailReceivedUtc,  string incidentDate, int pages, string Matchstatus, string SCRIBETEAM, string Fullsubject)
 		{
             try
             {
                 _mainForm.ShowLoader();
 
-                TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+                TimeZoneInfo indiaZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
 
                 // Ensure emailReceivedUtc is treated as UTC
                 if (emailReceivedUtc.Kind != DateTimeKind.Utc)
@@ -53,21 +57,20 @@ namespace EmailPDFMatchKeyword
                     emailReceivedUtc = DateTime.SpecifyKind(emailReceivedUtc, DateTimeKind.Utc);
                 }
 
-                DateTime emailReceivedEastern = TimeZoneInfo.ConvertTimeFromUtc(emailReceivedUtc, easternZone);
+                DateTime emailReceivedIndia = TimeZoneInfo.ConvertTimeFromUtc(emailReceivedUtc, indiaZone);
 
-                // (Optional) Only for logging: current US time
-                DateTime usNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, easternZone);
+                // (Optional) Only for logging: current India time
+                DateTime indiaNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaZone);
 
-                _mainForm.Log($"⏰ Current US (Eastern) time: {usNow}");
+                _mainForm.Log($"⏰ Current India (IST) time: {indiaNow}");
                 _mainForm.Log($"📧 Email received (UTC):    {emailReceivedUtc:u}");
-                _mainForm.Log($"📧 Email received (EST):    {emailReceivedEastern:G}");
+                _mainForm.Log($"📧 Email received (IST):    {emailReceivedIndia:G}");
 
                 // ---------------------------------------------
                 // 2️⃣ Decide sheet date based on EMAIL time
                 // ---------------------------------------------
-                // Pehle yaha DateTime.UtcNow pass kar rahe the,
-                // ab emailReceivedEastern pass kar rahe hain.
-                DateTime targetDate = CalculateTargetSheetDate(emailReceivedEastern);
+                // Decide sheet date based on EMAIL time in IST
+                DateTime targetDate = CalculateTargetSheetDate(emailReceivedIndia);
 
                 _mainForm.Log($"📅 Target sheet date (based on email): {targetDate:MM/dd/yyyy}");
 
@@ -99,7 +102,7 @@ namespace EmailPDFMatchKeyword
 
                     try
                     {
-                        var templateSheet = spreadsheet.Sheets.FirstOrDefault(s => s.Properties.Title == "TEMPLATE");
+                        var templateSheet = spreadsheet.Sheets.FirstOrDefault(s => s.Properties.Title.ToUpper().Trim() == "TEMPLATE");
                         if (templateSheet == null) throw new Exception("❌ Template sheet not found.");
 
                         var copyRequest = new CopySheetToAnotherSpreadsheetRequest
@@ -167,13 +170,49 @@ namespace EmailPDFMatchKeyword
                         var matchSummary = await MatchAndNotMatchRecordCountAsync(targetSheetNameToProcess);
                         await SendEmailWithMatchSummary(matchSummary, targetSheetNameToProcess);
 
-                        _mainForm.Log("Match & Not Matched Records Data Calculated & Email sent Successfully");
+						try
+						{
+							string pathToUse = "";
+							// fallback to Documents/InvoiceAttachments/Logs
+							var fallbackDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FinalEmailReadFileAndCreateSheetLog", "Logs");
+							Directory.CreateDirectory(fallbackDir);
+							pathToUse = Path.Combine(fallbackDir, $"Log_{DateTime.Now:yyyyMMdd}.txt");
+							File.AppendAllText(pathToUse, $"Saved attachment: {sheetLink}");
+						}
+						catch
+						{
+							// ignore logging failures to file to avoid crashing the app
+						}
+						_mainForm.Log("Match & Not Matched Records Data Calculated & Email sent Successfully");
                     }
                     catch (Exception ex)
                     {
-                        _mainForm.Log($"❌ Failed to create new sheet: {ex.Message}");
+						try
+						{
+							string pathToUse = "";
+							// fallback to Documents/InvoiceAttachments/Logs
+							var fallbackDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FinalEmailReadFileAndCreateSheetLog", "Logs");
+							Directory.CreateDirectory(fallbackDir);
+							pathToUse = Path.Combine(fallbackDir, $"Log_{DateTime.Now:yyyyMMdd}.txt");
+							string errorMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] " +
+					                             $"Saved attachment Error: {ex.Message}";
+
+							if (ex.InnerException != null)
+							{
+								errorMessage += $" | Inner: {ex.InnerException.Message}";
+							}
+
+							errorMessage += Environment.NewLine;
+
+							File.AppendAllText(pathToUse, errorMessage);
+						}
+						catch
+						{
+							// ignore logging failures to file to avoid crashing the app
+						}
+						_mainForm.Log($"❌ Failed to create new sheet: {ex.Message}");
                         _mainForm.HideLoader();
-                        return;
+                        return false;
                     }
                 }
                 _mainForm.Log($"Loading values from {todaySheetName}...");
@@ -474,7 +513,7 @@ namespace EmailPDFMatchKeyword
 					{
 						_mainForm.Log($"⚠️ Case Number '{caseNumber}' already exists in this section. Skipping insert.");
 						_mainForm.HideLoader();
-						return;
+                return true;
 					}
 
 					_mainForm.Log("Case number not found. Proceeding to insert new row...");
@@ -619,81 +658,187 @@ namespace EmailPDFMatchKeyword
 						insertRow++; // 🔴 VERY IMPORTANT
 					}
 
-					if (insertColorSeparatorRow)
-					{
-						_mainForm.Log("Provider changed — inserting colored separator row...");
+                    if (insertColorSeparatorRow)
+                    {
+                        _mainForm.Log("Provider changed — inserting colored separator row...");
 
-						// Insert row
-						sheetsService.Spreadsheets.BatchUpdate(
-							new BatchUpdateSpreadsheetRequest
-							{
-								Requests = new List<Request>
-								{
-				                    new Request
-				                    {
-					                    InsertDimension = new InsertDimensionRequest
-					                    {
-						                    Range = new DimensionRange
-						                    {
-							                    SheetId = todaySheet.Properties.SheetId,
-							                    Dimension = "ROWS",
-							                    StartIndex = insertRow,
-							                    EndIndex = insertRow + 1
-						                    },
-						                    InheritFromBefore = true
-					                    }
-				                    }
-								}
-							},
-							_spreadsheetId
-						).Execute();
+                        // Insert exactly one separator row.
+                        // The row inherits formatting from the previous row.
+                        sheetsService.Spreadsheets.BatchUpdate(
+                            new BatchUpdateSpreadsheetRequest
+                            {
+                                Requests = new List<Request>
+                                {
+                new Request
+                {
+                    InsertDimension = new InsertDimensionRequest
+                    {
+                        Range = new DimensionRange
+                        {
+                            SheetId = todaySheet.Properties.SheetId,
+                            Dimension = "ROWS",
+                            StartIndex = insertRow,
+                            EndIndex = insertRow + 1
+                        },
 
-						// Apply color
-						sheetsService.Spreadsheets.BatchUpdate(
-							new BatchUpdateSpreadsheetRequest
-							{
-								Requests = new List<Request>
-								{
-				                    new Request
-				                    {
-					                    RepeatCell = new RepeatCellRequest
-					                    {
-						                    Range = new GridRange
-						                    {
-							                    SheetId = todaySheet.Properties.SheetId,
-							                    StartRowIndex = insertRow,
-							                    EndRowIndex = insertRow + 1
-						                    },
-						                    Cell = new CellData
-						                    {
-							                    UserEnteredFormat = new CellFormat
-							                    {
-													BackgroundColor = new Color
-                                                    {
-	                                                    Red = 0.56f,
-	                                                    Green = 0.77f,
-	                                                    Blue = 0.49f
-                                                    }
+                        // Keep existing table formatting inheritance.
+                        InheritFromBefore = true
+                    }
+                }
+                                }
+                            },
+                            _spreadsheetId
+                        ).Execute();
 
-												}
-											},
-						                    Fields = "userEnteredFormat.backgroundColor"
-					                    }
-				                    }
-								}
-							},
-							_spreadsheetId
-						).Execute();
+                        // ---------------------------------------------------------
+                        // IMPORTANT:
+                        // The newly inserted row is the colored divider row.
+                        // We want the SAME color as the previous provider table.
+                        // Only columns A:O should receive the color.
+                        // ---------------------------------------------------------
 
-						insertRow++; // 🔴 VERY IMPORTANT
-					}
+                        int separatorRowIndex = insertRow;
 
-					// ---------------------------------------------
-					// 9️⃣ Build new row values
-					// ---------------------------------------------
+                        try
+                        {
+                            // Use the previous provider's last data row as the
+                            // source for detecting the existing table color.
+                            int sampleRowIndex =
+                                lastDataRow != -1
+                                    ? lastDataRow
+                                    : (headerRow != -1 ? headerRow : separatorRowIndex);
+
+                            // Read formatting from A:O of the previous row.
+                            var getReq = sheetsService.Spreadsheets.Get(_spreadsheetId);
+
+                            getReq.Ranges = new List<string>
+        {
+            $"{todaySheetName}!A{sampleRowIndex + 1}:O{sampleRowIndex + 1}"
+        };
+
+                            getReq.IncludeGridData = true;
+
+                            var gridResp = getReq.Execute();
+
+                            var sheetWithGrid = gridResp.Sheets?
+                                .FirstOrDefault(
+                                    s => (s.Properties?.Title ?? string.Empty)
+                                        .Equals(todaySheetName, StringComparison.OrdinalIgnoreCase)
+                                );
+
+                            // Default fallback color = black.
+                            var dividerColor = new Color
+                            {
+                                Red = 0,
+                                Green = 0,
+                                Blue = 0
+                            };
+
+                            // ---------------------------------------------------------
+                            // Get the existing table border color.
+                            // The screenshot's table color is also used as the
+                            // divider/background color.
+                            // ---------------------------------------------------------
+
+                            if (sheetWithGrid?.Data != null &&
+                                sheetWithGrid.Data.Count > 0 &&
+                                sheetWithGrid.Data[0].RowData != null &&
+                                sheetWithGrid.Data[0].RowData.Count > 0)
+                            {
+                                var rowData = sheetWithGrid.Data[0].RowData[0];
+
+                                var cell = rowData?.Values?.FirstOrDefault();
+
+                                var effectiveFormat =
+                                    cell?.EffectiveFormat ??
+                                    cell?.UserEnteredFormat;
+
+                                var sampleBorder =
+                                    effectiveFormat?.Borders?.Top ??
+                                    effectiveFormat?.Borders?.Bottom ??
+                                    effectiveFormat?.Borders?.Left ??
+                                    effectiveFormat?.Borders?.Right;
+
+                                if (sampleBorder?.Color != null)
+                                {
+                                    dividerColor = new Color
+                                    {
+                                        Red = sampleBorder.Color.Red ?? 0,
+                                        Green = sampleBorder.Color.Green ?? 0,
+                                        Blue = sampleBorder.Color.Blue ?? 0,
+                                        Alpha = sampleBorder.Color.Alpha ?? 1
+                                    };
+                                }
+                            }
+
+                            // ---------------------------------------------------------
+                            // Apply the SAME color as background to A:O.
+                            // This creates the solid colored divider row exactly
+                            // like the existing provider table.
+                            // ---------------------------------------------------------
+
+                            var colorRequest = new BatchUpdateSpreadsheetRequest
+                            {
+                                Requests = new List<Request>
+            {
+                new Request
+                {
+                    RepeatCell = new RepeatCellRequest
+                    {
+                        Range = new GridRange
+                        {
+                            SheetId = todaySheet.Properties.SheetId,
+
+                            // Separator row only
+                            StartRowIndex = separatorRowIndex,
+                            EndRowIndex = separatorRowIndex + 1,
+
+                            // A:O only
+                            StartColumnIndex = 0,
+                            EndColumnIndex = 15
+                        },
+
+                        Cell = new CellData
+                        {
+                            UserEnteredFormat = new CellFormat
+                            {
+                                BackgroundColor = dividerColor
+                            }
+                        },
+
+                        Fields = "userEnteredFormat.backgroundColor"
+                    }
+                }
+            }
+                            };
+
+                            sheetsService.Spreadsheets
+                                .BatchUpdate(colorRequest, _spreadsheetId)
+                                .Execute();
+
+                            _mainForm.Log(
+                                $"✅ Colored provider separator applied to A:O. " +
+                                $"Provider = '{currentProvider}'"
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            _mainForm.Log(
+                                $"⚠️ Failed to apply colored provider separator: {ex.Message}"
+                            );
+                        }
+
+                        // Move to the row after the separator.
+                        // The actual data will be inserted here.
+                        insertRow++;
+                    }
+
+                    // ---------------------------------------------
+                    // 9️⃣ Build new row values
+                    // ---------------------------------------------
 
 
-					int currentRowCountForData = todaySheet.Properties.GridProperties.RowCount ?? values.Count;
+                    int currentRowCountForData = todaySheet.Properties.GridProperties.RowCount ?? values.Count;
 					int neededRowIndexForData = insertRow;        // 0-based
 					int neededRowCountForData = neededRowIndexForData + 1; // convert to 1-based
 
@@ -734,14 +879,26 @@ namespace EmailPDFMatchKeyword
 
 					_mainForm.Log("Building new row for insertion...");
 
-					List<object> newRow;
+            List<object> newRow;
+
+            // Determine NO. value. If provider changed and we inserted a colored separator row,
+            // reset numbering to 1 for the new provider. Otherwise continue sequence normally.
+            string noValue;
+            if (insertColorSeparatorRow)
+            {
+                noValue = "1";
+            }
+            else
+            {
+                noValue = (insertRow - startDataRow + 1).ToString();
+            }
 
 					if (isNotFoundProviderBlock)
 					{
 						// ✅ Provider NOT found → store ONLY the email subject in NOTES column
-						newRow = new List<object>
-	                    {
-		                    (insertRow - startDataRow + 1).ToString(),                         // NO.
+                        newRow = new List<object>
+                    {
+                        noValue,                         // NO.
                             "",                                                                // INITIALS
                             DateTime.Parse(targetDate.ToString()).ToString("MM/dd/yyyy", CultureInfo.InvariantCulture), // DATE
                             provider ?? "",                                                                // PROVIDER (unknown)
@@ -761,9 +918,9 @@ namespace EmailPDFMatchKeyword
 					else
 					{
 						// ✅ Provider FOUND → existing full row behavior
-						newRow = new List<object>
-	                    {
-		                    (insertRow - startDataRow + 1).ToString(),                         // NO.
+                        newRow = new List<object>
+                    {
+                        noValue,                         // NO.
                             "",                                                                // INITIALS
                             DateTime.Parse(targetDate.ToString()).ToString("MM/dd/yyyy", CultureInfo.InvariantCulture), // DATE
                             provider ?? "",                                                    // PROVIDER
@@ -796,19 +953,87 @@ namespace EmailPDFMatchKeyword
 					updateRequest.Execute();
 
 					_mainForm.Log($"✅ Row inserted at {todaySheetName}!A{insertRow + 1}. Provider = '{provider}' (section may be '{NotFoundTitle}').");
-					_mainForm.HideLoader();
+					try
+					{
+						string pathToUse = "";
+						// fallback to Documents/InvoiceAttachments/Logs
+						var fallbackDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FinalEmailReadFileAndCreateSheetLog", "Logs");
+						Directory.CreateDirectory(fallbackDir);
+						pathToUse = Path.Combine(fallbackDir, $"Log_{DateTime.Now:yyyyMMdd}.txt");
+                        string errorMessage = $"✅ Row inserted at {todaySheetName}!A{insertRow + 1}. Provider = '{provider}' (section may be '{NotFoundTitle}').";
+
+
+
+						errorMessage += Environment.NewLine;
+
+						File.AppendAllText(pathToUse, errorMessage);
+					}
+					catch
+					{
+						// ignore logging failures to file to avoid crashing the app
+					}
+                    _mainForm.HideLoader();
+                    return true;
 				}
 				catch (Google.GoogleApiException gEx)
 				{
+					try
+					{
+						string pathToUse = "";
+						// fallback to Documents/InvoiceAttachments/Logs
+						var fallbackDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FinalEmailReadFileAndCreateSheetLog", "Logs");
+						Directory.CreateDirectory(fallbackDir);
+						pathToUse = Path.Combine(fallbackDir, $"Log_{DateTime.Now:yyyyMMdd}.txt");
+						string errorMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] " +
+											 $"Saved attachment Error1: {gEx.Message}";
+
+						if (gEx.InnerException != null)
+						{
+							errorMessage += $" | Inner: {gEx.InnerException.Message}";
+						}
+
+						errorMessage += Environment.NewLine;
+
+						File.AppendAllText(pathToUse, errorMessage);
+					}
+					catch
+					{
+						// ignore logging failures to file to avoid crashing the app
+					}
 					_mainForm.Log($"❌ Google Sheets API Error while reading sheet '{todaySheetName}': {gEx.Message}");
-					_mainForm.HideLoader();
+                    _mainForm.HideLoader();
+                    return false;
 				}
 
 			}
 			catch (Exception ex)
             {
+				try
+				{
+					string pathToUse = "";
+					// fallback to Documents/InvoiceAttachments/Logs
+					var fallbackDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FinalEmailReadFileAndCreateSheetLog", "Logs");
+					Directory.CreateDirectory(fallbackDir);
+					pathToUse = Path.Combine(fallbackDir, $"Log_{DateTime.Now:yyyyMMdd}.txt");
+					string errorMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] " +
+										 $"Saved attachment EPPlus Error: {ex.Message}";
+
+					if (ex.InnerException != null)
+					{
+						errorMessage += $" | Inner: {ex.InnerException.Message}";
+					}
+
+					errorMessage += Environment.NewLine;
+
+					File.AppendAllText(pathToUse, errorMessage);
+				}
+				catch
+				{
+					// ignore logging failures to file to avoid crashing the app
+				}
                 _mainForm.Log($"EPPlus error: {ex.Message}\r\nCheck if the file is a valid Excel format and not open in another program.");
                 _mainForm.HideLoader();
+                return false;
             }
 		}
 
@@ -870,7 +1095,18 @@ namespace EmailPDFMatchKeyword
             // 4️⃣ Mark the entire thread as read
             await GServices.Users.Threads.Modify(modifyRequest, "me", threadId).ExecuteAsync();
 
-            _mainForm.Log($"✅ Entire thread '{subjectHeader}' marked as read.");
+            // Log the IST timestamp for when the thread was marked as read
+            try
+            {
+                TimeZoneInfo indiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                DateTime indiaNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaTimeZone);
+                _mainForm.Log($"{indiaNow:dd/MM/yyyy HH:mm:ss} IST - ✅ Entire thread '{subjectHeader}' marked as read.");
+            }
+            catch (Exception ex)
+            {
+                // If timezone lookup fails, still log the event with UTC fallback
+                _mainForm.Log($"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC - ✅ Entire thread '{subjectHeader}' marked as read. (Failed to get IST: {ex.Message})");
+            }
 
             //await GServices.Users.Messages.Modify(mods, "me", messageId).ExecuteAsync();
             //_mainForm.Log($"Message {subjectHeader} marked as read.");
@@ -2343,48 +2579,12 @@ namespace EmailPDFMatchKeyword
             return tableRows;
         }
 
-        public DateTime CalculateTargetSheetDate(DateTime now)
+        // Business rule: target sheet date is exactly the EMAIL RECEIVED DATE in IST (date portion only)
+        // This must not depend on current system date or any "next business day" heuristics.
+        public DateTime CalculateTargetSheetDate(DateTime emailReceivedIst)
         {
-            var time = now.TimeOfDay;
-            var cutoff = new TimeSpan(17, 0, 0); // 5 PM
-
-            switch (now.DayOfWeek)
-            {
-                case DayOfWeek.Monday:
-                    return now.Date.AddDays(time < cutoff ? 1 : 2); // Tue / Wed
-
-                case DayOfWeek.Tuesday:
-                    return now.Date.AddDays(time < cutoff ? 1 : 2); // Wed / Thu
-
-                case DayOfWeek.Wednesday:
-                    return now.Date.AddDays(time < cutoff ? 1 : 2); // Thu / Fri
-
-                case DayOfWeek.Thursday:
-                    return time < cutoff
-                        ? now.Date.AddDays(1) // Friday
-                        : GetNextWeekday(now, DayOfWeek.Monday); // Monday
-
-                case DayOfWeek.Friday:
-                    return GetNextWeekday(now, DayOfWeek.Monday); // Always Monday
-
-                case DayOfWeek.Saturday:
-                    return time < cutoff
-                        ? GetNextWeekday(now, DayOfWeek.Monday) // before 5PM → Monday
-                        : GetNextWeekday(now, DayOfWeek.Tuesday); // after 5PM → Tuesday
-
-                case DayOfWeek.Sunday:
-                    return GetNextWeekday(now, DayOfWeek.Tuesday); // always → Tuesday
-
-                default:
-                    return now.Date.AddDays(1);
-            }
-        }
-
-        private DateTime GetNextWeekday(DateTime from, DayOfWeek day)
-        {
-            int daysToAdd = ((int)day - (int)from.DayOfWeek + 7) % 7;
-            if (daysToAdd == 0) daysToAdd = 7;
-            return from.Date.AddDays(daysToAdd);
+            // emailReceivedIst is expected to already be converted to India Standard Time
+            return emailReceivedIst.Date;
         }
 
 
@@ -2392,19 +2592,17 @@ namespace EmailPDFMatchKeyword
 		{
 			try
 			{
-				// --- Get current US Eastern Time ---
-				TimeZoneInfo easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
-				DateTime usNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, easternZone);
-				_mainForm.Log($"⏰ Current US (Eastern) time: {usNow}");
+                // --- Use India Standard Time for business date decisions ---
+                TimeZoneInfo indiaZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                DateTime indiaNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaZone);
+                _mainForm.Log($"⏰ Current India (IST) time: {indiaNow}");
 
-				// ✅ NEW: convert emailReceivedUtc to US Eastern
-				DateTime emailReceivedEastern = TimeZoneInfo.ConvertTimeFromUtc(emailReceivedUtc, easternZone);
-				_mainForm.Log($"📧 Email received (UTC):    {emailReceivedUtc:yyyy-MM-dd HH:mm:ss} (UTC)");
-				_mainForm.Log($"📧 Email received (Eastern): {emailReceivedEastern:yyyy-MM-dd HH:mm:ss} (US ET)");
+                DateTime emailReceivedIndia = TimeZoneInfo.ConvertTimeFromUtc(emailReceivedUtc, indiaZone);
+                _mainForm.Log($"📧 Email received (UTC):    {emailReceivedUtc:yyyy-MM-dd HH:mm:ss} (UTC)");
+                _mainForm.Log($"📧 Email received (IST): {emailReceivedIndia:yyyy-MM-dd HH:mm:ss} (IST)");
 
-
-				// ✅ Use *emailReceivedEastern* for your existing sheet-date logic
-				DateTime targetDate = CalculateTargetSheetDate(emailReceivedEastern);
+                // Use emailReceivedIndia for sheet-date logic
+                DateTime targetDate = CalculateTargetSheetDate(emailReceivedIndia);
 				string today = targetDate.ToString("MM.dd");
 
 
@@ -2412,9 +2610,26 @@ namespace EmailPDFMatchKeyword
 				//string today = targetDate.ToString("MM.dd");
 
 				// --- Build local folder path ---
-				string folderName = $"{today} ISG {CleanFileName(caseNumber)} {CleanFileName(CLAIMANTNAME)}";
-				string basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ISG_Messages");
-				string saveFolder = Path.Combine(basePath, folderName);
+				string folderName = $"{today} ISG {CleanFileName(caseNumber)} {CleanFileName(CLAIMANTNAME)}-{"TBC"}";
+				//string basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ISG_Messages");
+				string basePath = GetBaseFolderPath();
+				string? matchedFolder = FindDoctorFolder(basePath, PROVIDER);
+				string saveFolder;
+
+				// If found → use it
+				if (!string.IsNullOrEmpty(matchedFolder))
+				{
+					saveFolder = Path.Combine(matchedFolder, folderName);
+
+					_mainForm.Log($"✅ Existing doctor folder found: {saveFolder}");
+				}
+				else
+				{
+					// Else → create new (old logic)
+					saveFolder = Path.Combine(basePath, folderName);
+
+					_mainForm.Log($"🆕 No matching folder. Creating new: {saveFolder}");
+				}
 
 				// =========================
 				// 1) SAVE ATTACHMENTS LOCALLY
@@ -2449,6 +2664,7 @@ namespace EmailPDFMatchKeyword
 					{
 						string safeFileName = CleanFileName(fileName);
 						string filePath = Path.Combine(saveFolder, safeFileName);
+						LogPdfStatus(caseNumber, fileName, "InProgress");
 
 						try
 						{
@@ -2466,6 +2682,20 @@ namespace EmailPDFMatchKeyword
 							}
 
 							_mainForm.Log($"Final saved attachment: {filePath}");
+							LogPdfStatus(caseNumber, fileName, "Completed");
+							try
+							{
+								string pathToUse = "";
+								// fallback to Documents/InvoiceAttachments/Logs
+								var fallbackDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "FinalEmailReadFileLog", "Logs");
+								Directory.CreateDirectory(fallbackDir);
+								pathToUse = Path.Combine(fallbackDir, $"Log_{DateTime.Now:yyyyMMdd}.txt");
+								File.AppendAllText(pathToUse, $"Saved attachment: {filePath}");
+							}
+							catch
+							{
+								// ignore logging failures to file to avoid crashing the app
+							}
 						}
 						catch (Exception ex)
 						{
@@ -2553,11 +2783,28 @@ namespace EmailPDFMatchKeyword
 
 								var subListResp = await subListReq.ExecuteAsync();
 								var existingFolders = subListResp.Files ?? new List<Google.Apis.Drive.v3.Data.File>();
+								Google.Apis.Drive.v3.Data.File existingCaseFolder = default!;
 
-								var existingCaseFolder = existingFolders
-									.FirstOrDefault(f =>
+								if (!string.IsNullOrWhiteSpace(CLAIMANTNAME))
+								{
+									existingCaseFolder = existingFolders.FirstOrDefault(f =>
 										!string.IsNullOrEmpty(f.Name) &&
-										f.Name.IndexOf(caseNumber, StringComparison.OrdinalIgnoreCase) >= 0);
+										f.Name.IndexOf(caseNumber, StringComparison.OrdinalIgnoreCase) >= 0 &&
+										f.Name.IndexOf(CLAIMANTNAME, StringComparison.OrdinalIgnoreCase) >= 0
+									);
+								}
+								else
+								{
+									existingCaseFolder = existingFolders.FirstOrDefault(f =>
+										!string.IsNullOrEmpty(f.Name) &&
+										f.Name.IndexOf(caseNumber, StringComparison.OrdinalIgnoreCase) >= 0
+									);
+								}
+
+								//var existingCaseFolder = existingFolders
+								//	.FirstOrDefault(f =>
+								//		!string.IsNullOrEmpty(f.Name) &&
+								//		f.Name.IndexOf(caseNumber, StringComparison.OrdinalIgnoreCase) >= 0);
 
 								if (existingCaseFolder != null)
 								{
@@ -3162,5 +3409,93 @@ namespace EmailPDFMatchKeyword
             }
             return name;
         }
-    }
+		private string GetBaseFolderPath()
+		{
+			// TXT file path
+			string txtPath = Path.Combine(Application.StartupPath,"basepath.txt");
+
+			// Default fallback
+			string defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),"ISG_Messages");
+
+			// 1st Priority → TXT
+			if (File.Exists(txtPath))
+			{
+				string txtValue = File.ReadAllText(txtPath).Trim();
+
+				if (!string.IsNullOrEmpty(txtValue))
+					return txtValue;
+			}
+			// Last → Default
+			return defaultPath;
+		}
+		private string? FindDoctorFolder(string basePath, string doctorName)
+		{
+			if (!Directory.Exists(basePath))
+				return null;
+
+			// Clean search name
+			string cleanDoctor = CleanNameFolder(doctorName);
+
+			foreach (var dir in Directory.GetDirectories(basePath))
+			{
+				string folderName = Path.GetFileName(dir);
+
+				string cleanFolder = CleanNameFolder(folderName);
+
+				// Partial match
+				if (cleanFolder.Contains(cleanDoctor))
+				{
+					return dir; // Found
+				}
+			}
+
+			return null; // Not found
+		}
+		private string CleanNameFolder(string name)
+		{
+			name = name.ToLower();
+
+			// Remove common titles
+			name = Regex.Replace(name, @"\b(dr|md)\b", "", RegexOptions.IgnoreCase);
+
+			// Remove special chars
+			name = Regex.Replace(name, @"[^a-z\s]", "");
+
+			// Remove extra spaces
+			name = Regex.Replace(name, @"\s+", " ").Trim();
+
+			return name;
+		}
+
+		private readonly object _statusLock = new object();
+
+		public void LogPdfStatus(string caseNo, string fileName, string status)
+		{
+			try
+			{
+				string baseDir = Path.Combine(
+					Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+					"InvoiceAttachments",
+					"Logs");
+
+				Directory.CreateDirectory(baseDir);
+
+				string statusFile =
+					Path.Combine(baseDir, $"ProcessStatus_{DateTime.Now:yyyyMMdd}.txt");
+
+				string line =
+					$"{DateTime.Now:dd/MM/yyyy HH:mm:ss} - ISG {caseNo} - {fileName} - {status}\r\n";
+
+				lock (_statusLock)
+				{
+					File.AppendAllText(statusFile, line);
+				}
+			}
+			catch
+			{
+				// silent
+			}
+		}
+
+	}
 }
