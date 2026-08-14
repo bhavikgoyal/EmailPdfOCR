@@ -57,6 +57,24 @@ namespace EmailPDFMatchKeyword
         private TextBox txtResults;  // class-level variable
         private System.Threading.Timer pollTimer;
         private SheetsService _sheetsService;
+        private static DateTime ProcessingStartDate
+        {
+            get
+            {
+                TimeZoneInfo indiaZone;
+                try
+                {
+                    indiaZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                }
+                catch
+                {
+                    indiaZone = TimeZoneInfo.Utc;
+                }
+
+                DateTime indiaNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaZone);
+                return indiaNow.Date;
+            }
+        }
         private string _spreadsheetId = AppSettingsHelper.Get("GoogleDrive:SpreadsheetId");
         private CancellationTokenSource cancellationTokenSource;
         private GoogleSheetHelper _sheetHelper;
@@ -172,12 +190,6 @@ namespace EmailPDFMatchKeyword
 			Controls.Add(btnClear);
 			Controls.Add(btnfoldersetting);
 
-
-			//CheckBox chkSearchPdfText = new CheckBox { Left = 100, Top = 12, Text = "Search inside PDF", Checked = true };
-			//chkSearchPdfText.CheckedChanged += (s, e) => searchPdf = chkSearchPdfText.Checked;
-			//Controls.Add(chkSearchPdfText);
-
-			// Loader label
 			lblLoading = new Label
             {
                 Text = "Processing...",
@@ -189,7 +201,6 @@ namespace EmailPDFMatchKeyword
             };
             Controls.Add(lblLoading);
 
-            // Optional: Progress bar
             progressBar = new ProgressBar
             {
                 Left = 500,
@@ -704,20 +715,7 @@ namespace EmailPDFMatchKeyword
                 var labelsResponse = await service.Users.Labels.Get("me", "INBOX").ExecuteAsync(cancellationToken);
                 int labelUnread = labelsResponse.MessagesUnread ?? 0;
 
-                if (labelUnread == 0)
-                {
-                    Log("✅ No new messages in INBOX.");
-                    return;
-                }
-
-				//var localNow = DateTime.Now;              // local machine time (same as your "current date")
-				////var lastDayLocal = localNow.Date;         // today at 00:00 (local)
-				////var firstDayLocal = lastDayLocal.AddDays(-2); // 3-day window start at 00:00 (local)
-				//var windowStartLocal = localNow.AddDays(-2); // ✅ last 24 hours
-
-				//// For Gmail "after:" we need UTC epoch seconds
-				//var windowStartUtc = windowStartLocal.ToUniversalTime();  // 3 days ago at local midnight -> UTC
-				//long epochWindowStart = new DateTimeOffset(windowStartUtc).ToUnixTimeSeconds();
+                Log($"Inbox unread count: {labelUnread}");
 
                 TimeZoneInfo indiaZone;
                 try
@@ -729,52 +727,31 @@ namespace EmailPDFMatchKeyword
                     Log($"⚠️ Failed to find India Standard Time zone: {tzEx.Message}. Using UTC fallback.");
                     indiaZone = TimeZoneInfo.Utc;
                 }
+                DateTime indiaNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaZone);
+                var windowStartLocal = indiaNow.Date.AddDays(-2); 
+                var windowEndLocalExclusive = indiaNow.Date;  
 
-                // Determine processing date from persistent state anchored to ExtractMethod.ProcessingStartDate
-                string stateFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lastProcessedDate.txt");
-                DateTime processingDate;
+                var procStartIst = DateTime.SpecifyKind(windowStartLocal, DateTimeKind.Unspecified);
+                var procStartUtc = TimeZoneInfo.ConvertTimeToUtc(procStartIst, indiaZone);
+                long epochWindowStart = new DateTimeOffset(procStartUtc).ToUnixTimeSeconds();
 
-                if (File.Exists(stateFile))
-                {
-                    try
-                    {
-                        var txt = File.ReadAllText(stateFile).Trim();
-                        var lastProcessed = DateTime.ParseExact(txt, "yyyy-MM-dd", CultureInfo.InvariantCulture);
-                        processingDate = lastProcessed.AddDays(1);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"⚠️ Failed to read lastProcessedDate.txt: {ex.Message}. Falling back to static start date.");
-                        processingDate = ExtractMethod.ProcessingStartDate.AddDays(-1);
-                    }
-                }
-                else
-                {
-                    // First run: PROCESSING START DATE's previous day
-                    processingDate = ExtractMethod.ProcessingStartDate.AddDays(-1);
-                }
+                var procEndIst = DateTime.SpecifyKind(windowEndLocalExclusive, DateTimeKind.Unspecified);
+                var procEndUtc = TimeZoneInfo.ConvertTimeToUtc(procEndIst, indiaZone);
+                long epochWindowEnd = new DateTimeOffset(procEndUtc).ToUnixTimeSeconds();
 
-                // Log anchor and processing date
-                Log($"📅 Static processing anchor date: {ExtractMethod.ProcessingStartDate:dd-MM-yyyy}");
-                Log($"📅 First processing date: {ExtractMethod.ProcessingStartDate.AddDays(-1):dd-MM-yyyy}");
-                Log($"📅 Current processing date: {processingDate:dd-MM-yyyy}");
+                long gmailAfter = epochWindowStart > 0 ? epochWindowStart - 1 : 0;
+                Log($"Current IST Date: {indiaNow:yyyy-MM-dd}");
+               var displayStart = windowStartLocal; 
+                var displayEndInclusive = windowEndLocalExclusive.AddTicks(-1);
+                Log($"Window Start IST (inclusive): {displayStart:dd/MM/yyyy HH:mm:ss}");
+                Log($"Window End IST (exclusive): {windowEndLocalExclusive:dd/MM/yyyy HH:mm:ss}  (includes up to {displayEndInclusive:dd/MM/yyyy HH:mm:ss.fff})");
+                Log($"Gmail epoch (after) used: {gmailAfter} (UTC seconds) → converted from {procStartIst:yyyy-MM-dd HH:mm:ss} IST");
+                Log($"Gmail epoch (before) used: {epochWindowEnd} (UTC seconds) → converted from {procEndIst:yyyy-MM-dd HH:mm:ss} IST");
+                Log($"🔎 Fetching unread threads covering IST window: {windowStartLocal:dd/MM/yyyy} (inclusive) → {windowEndLocalExclusive:dd/MM/yyyy} (exclusive). Gmail after:{gmailAfter} before:{epochWindowEnd}");
 
-                // IST boundaries for the processing date
-                var processingStartIst = new DateTime(processingDate.Year, processingDate.Month, processingDate.Day, 0, 0, 0, DateTimeKind.Unspecified);
-                var processingNextStartIst = processingStartIst.AddDays(1);
-
-                // Convert IST boundaries to UTC for Gmail query (Gmail uses UTC epoch seconds)
-                var processingStartUtc = TimeZoneInfo.ConvertTimeToUtc(processingStartIst, indiaZone);
-                var processingNextStartUtc = TimeZoneInfo.ConvertTimeToUtc(processingNextStartIst, indiaZone);
-
-                long epochWindowStart = new DateTimeOffset(processingStartUtc).ToUnixTimeSeconds();
-                long epochWindowEnd = new DateTimeOffset(processingNextStartUtc).ToUnixTimeSeconds();
-
-                Log($"🔎 Searching unread emails for:\n{processingStartIst:dd/MM/yyyy 00:00:00} IST -> {processingNextStartIst:dd/MM/yyyy 00:00:00} IST\n(UTC after:{epochWindowStart} before:{epochWindowEnd})");
-
-                // 1) Get unread threads with at least one message during the exact processing IST date
                 var request = service.Users.Threads.List("me");
-                request.Q = $"in:inbox is:unread after:{epochWindowStart} before:{epochWindowEnd} (filename:pdf OR filename:doc OR filename:docx)";
+                request.Q = $"in:inbox after:{gmailAfter} before:{epochWindowEnd} "  + 
+                    "(filename:pdf OR filename:doc OR filename:docx)";
 
 				request.IncludeSpamTrash = false;
 
@@ -799,29 +776,15 @@ namespace EmailPDFMatchKeyword
 
                 if (allThreads.Count == 0)
                 {
-                    Log($"No new unread threads found for {processingDate:dd/MM/yyyy}.");
-                    // No emails for this processing date → mark date complete so we advance sequentially
-                    try
-                    {
-                        stateFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lastProcessedDate.txt");
-                        File.WriteAllText(stateFile, processingDate.ToString("yyyy-MM-dd"));
-                        Log($"✅ No emails found. Marked {processingDate:dd-MM-yyyy} as completed.");
-                        Log($"📅 Moving to next processing date: {processingDate.AddDays(1):dd-MM-yyyy}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"⚠️ Failed to update processing state: {ex.Message}");
-                    }
+                    Log("No new unread threads found since ProcessingStartDate.");
                     return;
                 }
 
-                // Gmail API returns newest first
                 var fifoMessages = allThreads.AsEnumerable().Reverse().ToList();
 
-                Log($"📨 Found {fifoMessages.Count} unread thread(s) for {processingDate:dd/MM/yyyy} (IST).");
+                Log($"📨 Loaded {fifoMessages.Count} unread threads for processing since {windowStartLocal:dd/MM/yyyy} IST.");
 
-                int processedEmails = 0;
-                bool anyFailed = false; // track if any message failed or was left unread
+				int processedEmails = 0;
 
 
 				foreach (var msgItem in fifoMessages)
@@ -849,26 +812,24 @@ namespace EmailPDFMatchKeyword
 
 						// SCENARIO 1: inspect ALL messages in the thread
 
-						bool threadHasAtLeastTwoUnreadValidAttachments = fullThread.Messages.Any(m =>
-	                            m.LabelIds != null &&
-	                            m.LabelIds.Contains("UNREAD") &&
-	                            m.Payload?.Parts != null &&
-	                            m.Payload.Parts.Count(p =>
-		                            !string.IsNullOrEmpty(p.Filename) &&
-		                            (
-			                            p.Filename.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||
-			                            p.Filename.EndsWith(".doc", StringComparison.OrdinalIgnoreCase) ||
-			                            p.Filename.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
-		                            )
-	                            ) >= 2
+                        // Thread must contain at least 2 valid attachments (pdf/doc/docx) in any message of the thread
+                        bool threadHasAtLeastTwoUnreadValidAttachments = fullThread.Messages.Any(m =>
+                                m.Payload?.Parts != null &&
+                                m.Payload.Parts.Count(p =>
+                                    !string.IsNullOrEmpty(p.Filename) &&
+                                    (
+                                        p.Filename.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||
+                                        p.Filename.EndsWith(".doc", StringComparison.OrdinalIgnoreCase) ||
+                                        p.Filename.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
+                                    )
+                                ) >= 2
                             );
 
-                        if (!threadHasAtLeastTwoUnreadValidAttachments)
-                        {
-                            Log($"⏩ Thread {msgItem.Id} skipped (less than 2 UNREAD PDF/DOC/DOCX attachments).");
-                            anyFailed = true; // keep unread / treat as not-completed for this date
-                            continue;
-                        }
+						if (!threadHasAtLeastTwoUnreadValidAttachments)
+						{
+							Log($"⏩ Thread {msgItem.Id} skipped (less than 2 UNREAD PDF/DOC/DOCX attachments).");
+							continue;
+						}
 
 						var messageInfos = fullThread.Messages
 	                        .Select(m =>
@@ -898,15 +859,10 @@ namespace EmailPDFMatchKeyword
 						}
 
                         // SCENARIO 2: check if ANY unread message in thread is within configured business-date window
-						//bool anyMessageInWindow = messageInfos
-						//	.Any(i => i.Local >= windowStartLocal && i.Local <= localNow);
-
-                        // Determine if any UNREAD message in this thread falls inside the previous IST date window
+                        // Consider any message in the thread that falls in the date window (read or unread)
                         bool anyMessageInWindow = messageInfos.Any(i =>
-                                i.Message.LabelIds != null &&
-                                i.Message.LabelIds.Contains("UNREAD") &&
-                                i.Utc >= processingStartUtc &&
-                                i.Utc < processingNextStartUtc);
+                                i.Local >= windowStartLocal &&
+                                i.Local < windowEndLocalExclusive);
 
 
 						if (!anyMessageInWindow)
@@ -926,47 +882,200 @@ namespace EmailPDFMatchKeyword
                             .Where(i =>
                                 i.Message.LabelIds != null &&
                                 i.Message.LabelIds.Contains("UNREAD") &&
-                                i.Utc >= processingStartUtc &&
-                                i.Utc < processingNextStartUtc)
-                            .OrderBy(i => i.Utc)
+                                i.Local >= windowStartLocal &&
+                                i.Local < windowEndLocalExclusive)
+                            .OrderBy(i => i.Local)
                             .ToList();
 
-						if (unreadMessagesInWindow.Count == 0)
-						{
-							Log("======================================================");
-                            Log($"Thread {msgItem.Id} has no UNREAD messages since configured start date (maybe all read already).");
-							Log("✔ Moving to next thread...");
-							Log("======================================================");
-							continue;
-						}
+                        if (unreadMessagesInWindow.Count == 0)
+                        {
+                            Log("======================================================");
+                            Log($"Thread {msgItem.Id} has no messages in the configured date window.");
+                            Log("✔ Moving to next thread...");
+                            Log("======================================================");
+                            continue;
+                        }
 
                         Log($"✅ Thread {msgItem.Id} has {unreadMessagesInWindow.Count} unread message(s) since configured start date.");
 
 
-						// Process ALL messages inside this thread
-						//foreach (var message in fullThread.Messages)
 						foreach (var info in unreadMessagesInWindow)
                         {
 
 							var message = info.Message;
-							var msgUtc = info.Utc;
-							var msgLocal = info.Local;
+                            var msgUtc = info.Utc; 
+                            var msgLocal = info.Local; 
 
-							Log($"📅 Email received on: {msgUtc:u} (UTC), {msgLocal} (Local)");
+                            Log($"📅 Receive Date (UTC): {msgUtc:u}");
+                            Log($"📅 Receive Date (IST): {msgLocal:yyyy-MM-dd HH:mm:ss} (IST)");
+                            Log($"📌 Reference ProcessingStartDate (IST): {ProcessingStartDate:yyyy-MM-dd}");
+                            Log($"📌 Allowed Receive Window (IST): {windowStartLocal:yyyy-MM-dd 00:00:00} inclusive → {windowEndLocalExclusive:yyyy-MM-dd 00:00:00} exclusive");
+                            Log($"🔍 Processing message: subject + snippet...");
 							Log($"🔍 Processing message: subject + snippet...");
 
 							string subject = message.Payload?.Headers?
 								.FirstOrDefault(h => h.Name.Equals("Subject", StringComparison.OrdinalIgnoreCase))
 								?.Value ?? "NoSubject";
 
-							Log($"   Subject: {subject}");
-							Log($"   Snippet: {message.Snippet}");
+                            Log($"   Subject: {subject}");
+                            Log($"   Snippet: {message.Snippet}");
+                         
 
-							
-							Log($"🔍 Processing message: Subject='{subject}', snippet='{message.Snippet}'");
+                            DateTime? subjectDate = null;
+                            string subjectDateRaw = "NOT FOUND";
 
-							// Your extracted data placeholders
-							string billCharges = "Not Found", billDate = "Not Found", geicoCharges = "Not Found", geicoDate = "Not Found", caseNumber = "Not Found", CLAIMANTNAME = "Not Found", PROVIDER = "Not Found", INCIDENTDATE = "Not Found", SCRIBETEAM = "Not Found";
+                            string subjectOnly = subject ?? "";
+
+                            var subjectDateMatch = Regex.Match(
+                                subjectOnly,
+                                @"(?<!\d)\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}(?!\d)"
+                            );
+
+                            if (subjectDateMatch.Success)
+                            {
+                                subjectDateRaw = subjectDateMatch.Value;
+
+                                string[] dateFormats =
+                                {
+        "M/d/yyyy",
+        "MM/d/yyyy",
+        "M/dd/yyyy",
+        "MM/dd/yyyy",
+
+        "M/d/yy",
+        "MM/d/yy",
+        "M/dd/yy",
+        "MM/dd/yy",
+
+        "M-d-yyyy",
+        "MM-d-yyyy",
+        "M-dd-yyyy",
+        "MM-dd-yyyy",
+
+        "M-d-yy",
+        "MM-d-yy",
+        "M-dd-yy",
+        "MM-dd-yy"
+    };
+
+                                if (DateTime.TryParseExact(
+                                    subjectDateRaw,
+                                    dateFormats,
+                                    CultureInfo.InvariantCulture,
+                                    DateTimeStyles.None,
+                                    out DateTime parsedSubjectDate))
+                                {
+                                    subjectDate = parsedSubjectDate.Date;
+
+                                    Log($"✅ SUBJECT DATE FOUND: {subjectDate:MM/dd/yyyy}");
+                                }
+                            }
+
+                            // ============================================================
+                            // 2. SNIPPET DUE BACK DATE
+                            // ONLY IF SUBJECT DATE WAS NOT FOUND
+                            // ============================================================
+
+                            if (!subjectDate.HasValue)
+                            {
+                                string snippetOnly = message.Snippet ?? "";
+
+                                var dueDateMatch = Regex.Match(
+                                    snippetOnly,
+                                    @"(?:due\s+(?:back|in\s+hand))\s*:?\s*(?<date>\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})",
+                                    RegexOptions.IgnoreCase);
+
+                                if (dueDateMatch.Success)
+                                {
+                                    string dueDateRaw = dueDateMatch.Groups["date"].Value;
+
+                                    string[] dueDateFormats =
+                                    {
+            "M/d/yyyy",
+            "MM/d/yyyy",
+            "M/dd/yyyy",
+            "MM/dd/yyyy",
+
+            "M/d/yy",
+            "MM/d/yy",
+            "M/dd/yy",
+            "MM/dd/yy",
+
+            "M-d-yyyy",
+            "MM-d-yyyy",
+            "M-dd-yyyy",
+            "MM-dd-yyyy",
+
+            "M-d-yy",
+            "MM-d-yy",
+            "M-dd-yy",
+            "MM-dd-yy"
+        };
+
+                                    if (DateTime.TryParseExact(
+                                        dueDateRaw,
+                                        dueDateFormats,
+                                        CultureInfo.InvariantCulture,
+                                        DateTimeStyles.None,
+                                        out DateTime parsedDueDate))
+                                    {
+                                        subjectDate = parsedDueDate.Date;
+                                        subjectDateRaw = dueDateRaw;
+
+                                        Log($"✅ DUE BACK DATE FOUND IN SNIPPET: {subjectDate:MM/dd/yyyy}");
+                                    }
+                                }
+                            }
+
+                            // ============================================================
+                            // 3. FINAL TARGET SHEET DATE
+                            // ============================================================
+
+                            DateTime targetSheetDateForCall;
+                            string reasonForSelection;
+
+                            if (subjectDate.HasValue)
+                            {
+                                // Subject/Snippet date gets priority
+                                targetSheetDateForCall = subjectDate.Value.Date;
+
+                                reasonForSelection =
+                                    "Subject/Due Back Date found; using that date.";
+                            }
+                            else
+                            {
+                                // No date found -> Receive Date
+                                targetSheetDateForCall = msgLocal.Date;
+
+                                reasonForSelection =
+                                    "Subject/Due Back Date not found; using Receive Date.";
+                            }
+
+                            // ============================================================
+                            // FINAL LOG
+                            // ============================================================
+
+                            Log($"📥 Extracted Date: {subjectDateRaw}");
+
+                            Log(
+                                $"📅 Subject/Due Back Date: " +
+                                $"{(subjectDate.HasValue ? subjectDate.Value.ToString("MM/dd/yyyy") : "NOT FOUND")}"
+                            );
+
+                            Log(
+                                $"📄 FINAL TARGET SHEET DATE: " +
+                                $"{targetSheetDateForCall:MM/dd/yyyy}"
+                            );
+
+                            Log(
+                                $"📄 FINAL TARGET SHEET NAME: " +
+                                $"{targetSheetDateForCall:MM/dd}"
+                            );
+
+                            Log($"ℹ️ Reason: {reasonForSelection}");
+
+                            // Your extracted data placeholders
+                            string billCharges = "Not Found", billDate = "Not Found", geicoCharges = "Not Found", geicoDate = "Not Found", caseNumber = "Not Found", CLAIMANTNAME = "Not Found", PROVIDER = "Not Found", INCIDENTDATE = "Not Found", SCRIBETEAM = "Not Found";
 
 							int medsToDocPageCount = 0;
 							bool hasBillPdf = false, hasGeicopeerPdf = false;
@@ -1456,15 +1565,83 @@ namespace EmailPDFMatchKeyword
                                 }
 
 
-                                if (hasBillPdf && hasGeicopeerPdf)
+                        if (hasBillPdf && hasGeicopeerPdf)
+                        {
+                            // Try to infer vendor from email subject or attachment filenames.
+                            // Default to null if not found so downstream logic behaves the same.
+                            string extractedVendor = null;
+
+                            try
+                            {
+                                if (!string.IsNullOrWhiteSpace(subject) && Regex.IsMatch(subject, "\\bISG\\b", RegexOptions.IgnoreCase))
                                 {
-                                    await _ExtractMethod.ProcessAndUploadFilesAsync(msgUtc, caseNumber, CLAIMANTNAME, status, PROVIDER, attachments, Driveservices );
+                                    extractedVendor = "ISG";
                                 }
+                                else if (attachments != null && attachments.Any(a => !string.IsNullOrWhiteSpace(a.FileName) && Regex.IsMatch(a.FileName, "ISG", RegexOptions.IgnoreCase)))
+                                {
+                                    extractedVendor = "ISG";
+                                }
+                            }
+                            catch
+                            {
+                                // If any unexpected error occurs while detecting vendor, leave as null.
+                                extractedVendor = null;
+                            }
+
+                            Log($"Extracted VENDOR (pre-upload): {extractedVendor ?? "<null>"}");
+
+                           try
+                            {
+                                if (string.Equals(extractedVendor?.Trim(), "ISG", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    DateTime parsedDate;
+                                    if (!string.IsNullOrWhiteSpace(billDate) &&
+                                        !billDate.Equals("Not Found", StringComparison.OrdinalIgnoreCase) &&
+                                        DateTime.TryParse(billDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedDate))
+                                    {
+                                        targetSheetDateForCall = parsedDate.Date;
+                                        Log($"ISG vendor: using extracted DATE (billDate) as target sheet date: {targetSheetDateForCall:MM/dd/yyyy}");
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(INCIDENTDATE) &&
+                                             !INCIDENTDATE.Equals("Not Found", StringComparison.OrdinalIgnoreCase) &&
+                                             DateTime.TryParse(INCIDENTDATE, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsedDate))
+                                    {
+                                        targetSheetDateForCall = parsedDate.Date;
+                                        Log($"ISG vendor: using extracted DATE (INCIDENTDATE) as target sheet date: {targetSheetDateForCall:MM/dd/yyyy}");
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log($"Error parsing extracted DATE for ISG vendor: {ex.Message}");
+                            }
+
+                            bool vendorPass = string.Equals(extractedVendor?.Trim(), "ISG", StringComparison.OrdinalIgnoreCase);
+
+                            Log($"Vendor Validation: {(vendorPass ? "PASS" : "FAIL")}");
+
+                            if (!vendorPass)
+                            {
+                                Log("PDF/Drive Processing: SKIPPED. Reason: VENDOR is not ISG or not found.");
+                            }
+                            else
+                            {
+                                await _ExtractMethod.ProcessAndUploadFilesAsync(
+                                    msgUtc,
+                                    caseNumber,
+                                    CLAIMANTNAME,
+                                    status,
+                                    PROVIDER,
+                                    attachments,
+                                    Driveservices,
+                                    targetSheetDateForCall);
+                            }
+                        }
 
                                 // Compare only if both values are valid
                                 if (status == "Matched" && hasBillPdf && hasGeicopeerPdf)
                                 {
-                                    bool sheetSuccess = await _ExtractMethod.InsertDataIntoSheetORDataBase(PROVIDER, caseNumber, CLAIMANTNAME, msgUtc, INCIDENTDATE, medsToDocPageCount, status, SCRIBETEAM, subject);
+                                    bool sheetSuccess = await _ExtractMethod.InsertDataIntoSheetORDataBase(PROVIDER, caseNumber, CLAIMANTNAME, msgUtc, INCIDENTDATE, medsToDocPageCount, status, SCRIBETEAM, subject, targetSheetDateForCall);
 
                                     result += "Values MATCH";
 
@@ -1477,12 +1654,11 @@ namespace EmailPDFMatchKeyword
                                     else
                                     {
                                         Log($"❌ Google Sheets insertion failed for '{subject}'. Keeping email unread for retry.");
-                                        anyFailed = true;
                                     }
                                 }
                                 else if (status == "Not Matched" && hasBillPdf && hasGeicopeerPdf)
                                 {
-                                    bool sheetSuccess = await _ExtractMethod.InsertDataIntoSheetORDataBase(PROVIDER, caseNumber, CLAIMANTNAME, msgUtc, INCIDENTDATE, medsToDocPageCount, status, SCRIBETEAM, subject);
+                                    bool sheetSuccess = await _ExtractMethod.InsertDataIntoSheetORDataBase(PROVIDER, caseNumber, CLAIMANTNAME, msgUtc, INCIDENTDATE, medsToDocPageCount, status, SCRIBETEAM, subject, targetSheetDateForCall);
                                     result += "Values DO NOT MATCH. Reason: " + mismatchReason;
 
                                     // Prepare the email body
@@ -1525,7 +1701,6 @@ namespace EmailPDFMatchKeyword
                                     else
                                     {
                                         Log($"❌ Google Sheets insertion failed for '{subject}'. Keeping email unread for retry.");
-                                        anyFailed = true;
                                     }
 
                                     Log(result);
@@ -1544,7 +1719,6 @@ namespace EmailPDFMatchKeyword
                             {
                                 Log("======================================================");
                                 Log($"Email :-: \"{subject}\" has not found the Dr.Name \"{PROVIDER}\" . Cannot proceed with this Email.");
-                                anyFailed = true; // leave unread and consider date incomplete
                                 Log("======================================================");
 
 								await Task.Delay(TimeSpan.FromSeconds(20), cancellationToken);
@@ -1566,27 +1740,7 @@ namespace EmailPDFMatchKeyword
                     }
                     HideLoader();
 					Log($"📬 Poll cycle finished. Processed {processedEmails} email(s).");
-                await Task.Delay(TimeSpan.FromSeconds(20), cancellationToken);
-
-                // If everything succeeded for this processing date, advance the persisted pointer
-                try
-                {
-                    stateFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lastProcessedDate.txt");
-                    if (!anyFailed)
-                    {
-                        File.WriteAllText(stateFile, processingDate.ToString("yyyy-MM-dd"));
-                        Log($"✅ Completed processing date: {processingDate:dd-MM-yyyy}");
-                        Log($"📅 Moving to next processing date: {processingDate.AddDays(1):dd-MM-yyyy}");
-                    }
-                    else
-                    {
-                        Log($"⚠️ Not all emails for {processingDate:dd-MM-yyyy} processed successfully. Will retry this date in next poll.");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log($"⚠️ Failed to update processing state: {ex.Message}");
-                }
+					 await Task.Delay(TimeSpan.FromSeconds(20), cancellationToken);
 					Log($"Delay for some time to avoid API Traffic Issue second :- 20.");
 
 				}
@@ -1599,29 +1753,37 @@ namespace EmailPDFMatchKeyword
             }
         }
 
-
-
-
 		private (DateTime Utc, DateTime Local) GetMessageReceivedDate(Google.Apis.Gmail.v1.Data.Message message)
 		{
-			// 1) Start from InternalDate
-			long epochMs = message.InternalDate ?? 0;
-			var utc = DateTimeOffset.FromUnixTimeMilliseconds(epochMs).UtcDateTime;
-			var local = utc.ToLocalTime();
+            // 1) Start from InternalDate (milliseconds since epoch)
+            long epochMs = message.InternalDate ?? 0;
+            var utc = DateTimeOffset.FromUnixTimeMilliseconds(epochMs).UtcDateTime;
 
-			// 2) Prefer the "Date" header if present and parseable
-			string rawDateHeader = message.Payload?.Headers?
-				.FirstOrDefault(h => h.Name.Equals("Date", StringComparison.OrdinalIgnoreCase))
-				?.Value;
+            // Always convert to India Standard Time for Local (business) calculations
+            TimeZoneInfo indiaZone;
+            try
+            {
+                indiaZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            }
+            catch
+            {
+                indiaZone = TimeZoneInfo.Utc;
+            }
 
-			if (!string.IsNullOrWhiteSpace(rawDateHeader) &&
-				DateTimeOffset.TryParse(rawDateHeader, out var hdr))
-			{
-				utc = hdr.UtcDateTime;
-				local = hdr.LocalDateTime;
-			}
+            var localIst = TimeZoneInfo.ConvertTimeFromUtc(utc, indiaZone);
 
-			return (utc, local);
+            // 2) Prefer the "Date" header if present and parseable — still interpret/convert to UTC then IST
+            string rawDateHeader = message.Payload?.Headers?
+                .FirstOrDefault(h => h.Name.Equals("Date", StringComparison.OrdinalIgnoreCase))
+                ?.Value;
+
+            if (!string.IsNullOrWhiteSpace(rawDateHeader) && DateTimeOffset.TryParse(rawDateHeader, out var hdr))
+            {
+                utc = hdr.UtcDateTime;
+                localIst = TimeZoneInfo.ConvertTimeFromUtc(utc, indiaZone);
+            }
+
+            return (utc, localIst);
 		}
 
 		public void CopyTemplateSheet(string filePath, string newSheetName)

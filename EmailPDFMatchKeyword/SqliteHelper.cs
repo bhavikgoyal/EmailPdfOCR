@@ -84,7 +84,9 @@ namespace EmailPDFMatchKeyword
             //cmd.Parameters.AddWithValue("@ScribeTeam", scribeTeam);
             cmd.Parameters.AddWithValue("@ScribeTeam",scribeTeam == null ? DBNull.Value : (object)scribeTeam);
             cmd.Parameters.AddWithValue("@DOA", incidentDate);
-            cmd.Parameters.AddWithValue("@Vendor", "ISG");
+            // Do NOT hardcode Vendor here. The caller should supply correct vendor via sheet insertion flow.
+            // Keep database insertion as-is but write NULL for vendor when unknown.
+            cmd.Parameters.AddWithValue("@Vendor", DBNull.Value);
             cmd.Parameters.AddWithValue("@CaseNumber", caseNumber);
             cmd.Parameters.AddWithValue("@ClaimantName", claimantName);
             cmd.Parameters.AddWithValue("@Pages", pages);
@@ -101,7 +103,8 @@ namespace EmailPDFMatchKeyword
       }
       catch(Exception ex)
       {
-        throw ex;
+        // Preserve original stack trace when propagating
+        throw;
       }
     }
 
