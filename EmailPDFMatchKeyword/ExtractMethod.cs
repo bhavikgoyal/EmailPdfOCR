@@ -21,9 +21,6 @@ namespace EmailPDFMatchKeyword
 {
     public class ExtractMethod
     {
-        // STATIC processing anchor date (do not change)
-        public static readonly DateTime ProcessingStartDate = new DateTime(2026, 8, 6);
-
         private MainForm _mainForm;
         public ExtractMethod(MainForm mainForm)
         {
@@ -37,13 +34,12 @@ namespace EmailPDFMatchKeyword
         }
 
         private readonly object logLock = new object();
-        private DriveService Driveservices;
         private string _spreadsheetId;  // put your real ID here
-        private GoogleSheetHelper _sheetHelper;
 
 
 
-        public async Task<bool> InsertDataIntoSheetORDataBase( string provider, string caseNumber, string claimantName, DateTime emailReceivedUtc,  string incidentDate, int pages, string Matchstatus, string SCRIBETEAM, string Fullsubject)
+        public async Task<bool> InsertDataIntoSheetORDataBase( string provider, string caseNumber, string claimantName, DateTime emailReceivedUtc,  string incidentDate, int pages, string Matchstatus, string SCRIBETEAM, string Fullsubject,
+DateTime targetSheetDate)
 		{
             try
             {
@@ -70,7 +66,7 @@ namespace EmailPDFMatchKeyword
                 // 2️⃣ Decide sheet date based on EMAIL time
                 // ---------------------------------------------
                 // Decide sheet date based on EMAIL time in IST
-                DateTime targetDate = CalculateTargetSheetDate(emailReceivedIndia);
+                DateTime targetDate = targetSheetDate.Date;
 
                 _mainForm.Log($"📅 Target sheet date (based on email): {targetDate:MM/dd/yyyy}");
 
@@ -523,7 +519,10 @@ namespace EmailPDFMatchKeyword
 					// ---------------------------------------------
 					_mainForm.Log("Finding insert position within section...");
 
-                    string vendor = "ISG";
+                    // vendor is currently a placeholder. Keep as null to reflect actual extraction.
+                    // The application should extract vendor from OCR/email; until that exists do not
+                    // force a value here. Using null avoids misleading hardcoded values in the sheet.
+                    string vendor = null;
 					int insertRow = -1;
 					int providerRecordCount = 0;
 					const int PROVIDER_COL = 3; 
@@ -531,8 +530,9 @@ namespace EmailPDFMatchKeyword
 
 					bool insertBlankRow = false;
 					bool insertColorSeparatorRow = false;
+                    bool providerChanged = false;
 
-					int lastDataRow = -1;
+                    int lastDataRow = -1;
 					string lastProvider = null;
 					string lastVendor = null;
 
@@ -548,49 +548,98 @@ namespace EmailPDFMatchKeyword
 					}
 					else
 					{
-						for (int r = startDataRow; r < values.Count; r++)
+                        for (int r = startDataRow; r < values.Count; r++)
+                        {
+                            var row = values[r];
+
+                            // ---------------------------------------------------------
+                            // Ignore completely empty rows.
+                            // DO NOT break here because empty rows can be
+                            // provider separator/color rows.
+                            // ---------------------------------------------------------
+                            bool isEmpty = row.All(c => string.IsNullOrWhiteSpace(c?.ToString()));
+
+                            if (isEmpty)
+                                continue;
+
+                            // ---------------------------------------------------------
+                            // Stop ONLY when the NEXT TABLE HEADER is reached.
+                            // Do NOT use knownProviders here because provider names
+                            // also exist inside normal data rows.
+                            // ---------------------------------------------------------
+                            int headerMatches = headerKeywords.Count(h =>
+                                row.Any(v =>
+                                    v?.ToString()
+                                     .Trim()
+                                     .Equals(h, StringComparison.OrdinalIgnoreCase) == true));
+
+                            if (headerMatches >= 2)
+                                break;
+
+                            // ---------------------------------------------------------
+                            // Read provider from PROVIDER column
+                            // ---------------------------------------------------------
+                            string rowProvider = "";
+
+                            if (row.Count > PROVIDER_COL)
+                                rowProvider = row[PROVIDER_COL]?.ToString()?.Trim() ?? "";
+
+                            // ---------------------------------------------------------
+                            // Only real data rows should affect provider counting.
+                            // ---------------------------------------------------------
+                            if (!string.IsNullOrWhiteSpace(rowProvider))
+                            {
+                                lastDataRow = r;
+
+                                if (row.Count > VENDOR_COL)
+                                    lastVendor = row[VENDOR_COL]?.ToString()?.Trim() ?? "";
+
+                                if (lastProvider == null ||
+                                    !string.Equals(rowProvider, lastProvider, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    providerRecordCount = 1;
+                                }
+                                else
+                                {
+                                    providerRecordCount++;
+                                }
+
+                                lastProvider = rowProvider;
+                            }
+                        }
+                        if (lastDataRow != -1)
 						{
-							var row = values[r];
-							string rowText = string.Join(" ", row).ToUpperInvariant();
+                            // CONDITION 1: Same provider, vendor different
+                            if (string.Equals(lastProvider, currentProvider, StringComparison.OrdinalIgnoreCase) &&
+                                !string.Equals(lastVendor, currentVendor, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _mainForm.Log("Same provider but vendor changed → inserting blank row");
+                                insertBlankRow = true;
+                                insertRow = lastDataRow + 1;
+                            }
+                            // CONDITION 2: Provider changed
+                            else if (!string.Equals(lastProvider, currentProvider, StringComparison.OrdinalIgnoreCase))
+                            {
+                                _mainForm.Log(
+                                    $"Provider changed from '{lastProvider}' to '{currentProvider}' → inserting colored separator");
 
-							// stop at next provider section
-							if (!string.IsNullOrWhiteSpace(rowText) &&
-								knownProviders.Any(p => rowText.Contains(p)))
-								break;
+                                insertColorSeparatorRow = true;
 
-							bool isEmpty = row.All(c => string.IsNullOrWhiteSpace(c?.ToString()));
-							if (isEmpty)
-								break;
+                                // IMPORTANT:
+                                // Current provider is a NEW provider group.
+                                providerChanged = true;
 
-							providerRecordCount++;
+                                // Do NOT carry previous provider count forward.
+                                providerRecordCount = 0;
 
-							lastDataRow = r;
-
-							if (row.Count > VENDOR_COL)
-							{
-								lastProvider = row[PROVIDER_COL]?.ToString();
-								lastVendor = row[VENDOR_COL]?.ToString();
-							}
-						}
-						if (lastDataRow != -1)
-						{
-							// CONDITION 1: Same provider, vendor different
-							if (string.Equals(lastProvider, currentProvider, StringComparison.OrdinalIgnoreCase) &&
-								!string.Equals(lastVendor, currentVendor, StringComparison.OrdinalIgnoreCase))
-							{
-								insertBlankRow = true;
-								insertRow = lastDataRow + 1;
-							}
-							// CONDITION 2: Provider changed
-							else if (!string.Equals(lastProvider, currentProvider, StringComparison.OrdinalIgnoreCase))
-							{
-								insertColorSeparatorRow = true;
-								insertRow = lastDataRow + 1;
-							}
-							else
-							{
-								insertRow = lastDataRow + 1;
-							}
+                                insertRow = lastDataRow + 1;
+                            }
+                        
+                            else
+                            {
+                                _mainForm.Log("Same provider and same vendor → normal row");
+                                insertRow = lastDataRow + 1;
+                            }
 						}
 						else
 						{
@@ -602,9 +651,11 @@ namespace EmailPDFMatchKeyword
 							insertRow = values.Count;
 					}
 
-					// ✅ If section already has 5 records, expand by inserting a blank row
-					if (!isNewSectionCreated && providerRecordCount >= 5)
-					{
+                    // ✅ If section already has 5 records, expand by inserting a blank row
+                    if (!isNewSectionCreated &&
+        !providerChanged &&
+        providerRecordCount >= 5)
+                    {
 						_mainForm.Log($"Section has {providerRecordCount} records. Expanding by inserting a new blank row...");
 						var expandRequest = new BatchUpdateSpreadsheetRequest
 						{
@@ -662,8 +713,9 @@ namespace EmailPDFMatchKeyword
                     {
                         _mainForm.Log("Provider changed — inserting colored separator row...");
 
-                        // Insert exactly one separator row.
-                        // The row inherits formatting from the previous row.
+                        // ---------------------------------------------------------
+                        // 1. Insert ONE blank separator row
+                        // ---------------------------------------------------------
                         sheetsService.Spreadsheets.BatchUpdate(
                             new BatchUpdateSpreadsheetRequest
                             {
@@ -680,8 +732,6 @@ namespace EmailPDFMatchKeyword
                             StartIndex = insertRow,
                             EndIndex = insertRow + 1
                         },
-
-                        // Keep existing table formatting inheritance.
                         InheritFromBefore = true
                     }
                 }
@@ -691,96 +741,86 @@ namespace EmailPDFMatchKeyword
                         ).Execute();
 
                         // ---------------------------------------------------------
-                        // IMPORTANT:
-                        // The newly inserted row is the colored divider row.
-                        // We want the SAME color as the previous provider table.
-                        // Only columns A:O should receive the color.
+                        // 1b. IMPORTANT: clear any values that got inherited into
+                        // this newly inserted row so it can NEVER show data.
                         // ---------------------------------------------------------
+                        var clearSeparatorRange = $"{todaySheetName}!A{insertRow + 1}:O{insertRow + 1}";
+                        sheetsService.Spreadsheets.Values
+                            .Clear(new ClearValuesRequest(), _spreadsheetId, clearSeparatorRange)
+                            .Execute();
 
-                        int separatorRowIndex = insertRow;
+                        // ---------------------------------------------------------
+                        // 2. Get the color of the provider block that JUST ENDED
+                        //    (lastProvider), not the incoming one. Fallback to
+                        //    currentProvider only if lastProvider has no color.
+                        // ---------------------------------------------------------
+                        Color sepColor = GetProviderColor(sheetsService, todaySheetName, lastProvider)
+                                          ?? GetProviderColor(sheetsService, todaySheetName, currentProvider);
 
-                        try
+                        if (sepColor == null)
                         {
-                            // Use the previous provider's last data row as the
-                            // source for detecting the existing table color.
-                            int sampleRowIndex =
-                                lastDataRow != -1
-                                    ? lastDataRow
-                                    : (headerRow != -1 ? headerRow : separatorRowIndex);
-
-                            // Read formatting from A:O of the previous row.
-                            var getReq = sheetsService.Spreadsheets.Get(_spreadsheetId);
-
-                            getReq.Ranges = new List<string>
-        {
-            $"{todaySheetName}!A{sampleRowIndex + 1}:O{sampleRowIndex + 1}"
-        };
-
-                            getReq.IncludeGridData = true;
-
-                            var gridResp = getReq.Execute();
-
-                            var sheetWithGrid = gridResp.Sheets?
-                                .FirstOrDefault(
-                                    s => (s.Properties?.Title ?? string.Empty)
-                                        .Equals(todaySheetName, StringComparison.OrdinalIgnoreCase)
-                                );
-
-                            // Default fallback color = black.
-                            var dividerColor = new Color
-                            {
-                                Red = 0,
-                                Green = 0,
-                                Blue = 0
-                            };
-
+                            _mainForm.Log(
+                                $"❌ Table color not found for provider '{lastProvider}' or '{currentProvider}'. " +
+                                "Separator row will remain uncolored."
+                            );
+                        }
+                        else
+                        {
                             // ---------------------------------------------------------
-                            // Get the existing table border color.
-                            // The screenshot's table color is also used as the
-                            // divider/background color.
+                            // 3. Apply color ONLY to separator row A:O
                             // ---------------------------------------------------------
-
-                            if (sheetWithGrid?.Data != null &&
-                                sheetWithGrid.Data.Count > 0 &&
-                                sheetWithGrid.Data[0].RowData != null &&
-                                sheetWithGrid.Data[0].RowData.Count > 0)
-                            {
-                                var rowData = sheetWithGrid.Data[0].RowData[0];
-
-                                var cell = rowData?.Values?.FirstOrDefault();
-
-                                var effectiveFormat =
-                                    cell?.EffectiveFormat ??
-                                    cell?.UserEnteredFormat;
-
-                                var sampleBorder =
-                                    effectiveFormat?.Borders?.Top ??
-                                    effectiveFormat?.Borders?.Bottom ??
-                                    effectiveFormat?.Borders?.Left ??
-                                    effectiveFormat?.Borders?.Right;
-
-                                if (sampleBorder?.Color != null)
+                            sheetsService.Spreadsheets.BatchUpdate(
+                                new BatchUpdateSpreadsheetRequest
                                 {
-                                    dividerColor = new Color
+                                    Requests = new List<Request>
                                     {
-                                        Red = sampleBorder.Color.Red ?? 0,
-                                        Green = sampleBorder.Color.Green ?? 0,
-                                        Blue = sampleBorder.Color.Blue ?? 0,
-                                        Alpha = sampleBorder.Color.Alpha ?? 1
-                                    };
-                                }
-                            }
+                    new Request
+                    {
+                        RepeatCell = new RepeatCellRequest
+                        {
+                            Range = new GridRange
+                            {
+                                SheetId = todaySheet.Properties.SheetId,
+                                StartRowIndex = insertRow,
+                                EndRowIndex = insertRow + 1,
+                                StartColumnIndex = 0,
+                                EndColumnIndex = 15
+                            },
+                            Cell = new CellData
+                            {
+                                UserEnteredFormat = new CellFormat { BackgroundColor = sepColor }
+                            },
+                            Fields = "userEnteredFormat.backgroundColor"
+                        }
+                    }
+                                    }
+                                },
+                                _spreadsheetId
+                            ).Execute();
 
-                            // ---------------------------------------------------------
-                            // Apply the SAME color as background to A:O.
-                            // This creates the solid colored divider row exactly
-                            // like the existing provider table.
-                            // ---------------------------------------------------------
+                            _mainForm.Log($"✅ Divider row colored with '{lastProvider}' table color.");
+                        }
 
-                            var colorRequest = new BatchUpdateSpreadsheetRequest
+                        // ---------------------------------------------------------
+                        // 4. Move to the next row for DATA.
+                        // ---------------------------------------------------------
+                        insertRow++;
+
+                        // ---------------------------------------------------------
+                        // 5. Clear + force the actual data row to WHITE before
+                        //    writing new data into it, so it never inherits the
+                        //    divider's color or any leftover values.
+                        // ---------------------------------------------------------
+                        var clearDataRowRange = $"{todaySheetName}!A{insertRow + 1}:O{insertRow + 1}";
+                        sheetsService.Spreadsheets.Values
+                            .Clear(new ClearValuesRequest(), _spreadsheetId, clearDataRowRange)
+                            .Execute();
+
+                        sheetsService.Spreadsheets.BatchUpdate(
+                            new BatchUpdateSpreadsheetRequest
                             {
                                 Requests = new List<Request>
-            {
+                                {
                 new Request
                 {
                     RepeatCell = new RepeatCellRequest
@@ -788,49 +828,27 @@ namespace EmailPDFMatchKeyword
                         Range = new GridRange
                         {
                             SheetId = todaySheet.Properties.SheetId,
-
-                            // Separator row only
-                            StartRowIndex = separatorRowIndex,
-                            EndRowIndex = separatorRowIndex + 1,
-
-                            // A:O only
+                            StartRowIndex = insertRow,
+                            EndRowIndex = insertRow + 1,
                             StartColumnIndex = 0,
                             EndColumnIndex = 15
                         },
-
                         Cell = new CellData
                         {
                             UserEnteredFormat = new CellFormat
                             {
-                                BackgroundColor = dividerColor
+                                BackgroundColor = new Color { Red = 1f, Green = 1f, Blue = 1f }
                             }
                         },
-
                         Fields = "userEnteredFormat.backgroundColor"
                     }
                 }
-            }
-                            };
+                                }
+                            },
+                            _spreadsheetId
+                        ).Execute();
 
-                            sheetsService.Spreadsheets
-                                .BatchUpdate(colorRequest, _spreadsheetId)
-                                .Execute();
-
-                            _mainForm.Log(
-                                $"✅ Colored provider separator applied to A:O. " +
-                                $"Provider = '{currentProvider}'"
-                            );
-                        }
-                        catch (Exception ex)
-                        {
-                            _mainForm.Log(
-                                $"⚠️ Failed to apply colored provider separator: {ex.Message}"
-                            );
-                        }
-
-                        // Move to the row after the separator.
-                        // The actual data will be inserted here.
-                        insertRow++;
+                        _mainForm.Log($"✅ Data row kept WHITE and cleared, ready for '{currentProvider}' data.");
                     }
 
                     // ---------------------------------------------
@@ -876,29 +894,60 @@ namespace EmailPDFMatchKeyword
 						_mainForm.Log($"✅ Inserted {rowsToAdd} row(s) for data. New row count = {todaySheet.Properties.GridProperties.RowCount}.");
 					}
 
+                    // ---------------------------------------------
+// 🛡️ SAFETY NET: Ensure the row we are about to write
+// data into is ALWAYS clean (no leftover values) and
+// ALWAYS white (no leftover divider/provider color),
+// no matter which path (normal / blank / separator / expand)
+// brought us here.
+// ---------------------------------------------
+var safetyClearRange = $"{todaySheetName}!A{insertRow + 1}:O{insertRow + 1}";
+sheetsService.Spreadsheets.Values
+    .Clear(new ClearValuesRequest(), _spreadsheetId, safetyClearRange)
+    .Execute();
+
+sheetsService.Spreadsheets.BatchUpdate(
+    new BatchUpdateSpreadsheetRequest
+    {
+        Requests = new List<Request>
+        {
+            new Request
+            {
+                RepeatCell = new RepeatCellRequest
+                {
+                    Range = new GridRange
+                    {
+                        SheetId = todaySheet.Properties.SheetId,
+                        StartRowIndex = insertRow,
+                        EndRowIndex = insertRow + 1,
+                        StartColumnIndex = 0,
+                        EndColumnIndex = 15
+                    },
+                    Cell = new CellData
+                    {
+                        UserEnteredFormat = new CellFormat
+                        {
+                            BackgroundColor = new Color { Red = 1f, Green = 1f, Blue = 1f }
+                        }
+                    },
+                    Fields = "userEnteredFormat.backgroundColor"
+                }
+            }
+        }
+    },
+    _spreadsheetId
+).Execute();
 
 					_mainForm.Log("Building new row for insertion...");
 
-            List<object> newRow;
-
-            // Determine NO. value. If provider changed and we inserted a colored separator row,
-            // reset numbering to 1 for the new provider. Otherwise continue sequence normally.
-            string noValue;
-            if (insertColorSeparatorRow)
-            {
-                noValue = "1";
-            }
-            else
-            {
-                noValue = (insertRow - startDataRow + 1).ToString();
-            }
+					List<object> newRow;
 
 					if (isNotFoundProviderBlock)
 					{
 						// ✅ Provider NOT found → store ONLY the email subject in NOTES column
-                        newRow = new List<object>
-                    {
-                        noValue,                         // NO.
+						newRow = new List<object>
+	                    {
+                        (providerRecordCount + 1).ToString(),                         // NO.
                             "",                                                                // INITIALS
                             DateTime.Parse(targetDate.ToString()).ToString("MM/dd/yyyy", CultureInfo.InvariantCulture), // DATE
                             provider ?? "",                                                                // PROVIDER (unknown)
@@ -918,9 +967,9 @@ namespace EmailPDFMatchKeyword
 					else
 					{
 						// ✅ Provider FOUND → existing full row behavior
-                        newRow = new List<object>
-                    {
-                        noValue,                         // NO.
+						newRow = new List<object>
+	                    {
+                        (providerRecordCount + 1).ToString(),                         // NO.
                             "",                                                                // INITIALS
                             DateTime.Parse(targetDate.ToString()).ToString("MM/dd/yyyy", CultureInfo.InvariantCulture), // DATE
                             provider ?? "",                                                    // PROVIDER
@@ -1071,6 +1120,196 @@ namespace EmailPDFMatchKeyword
             return parts.Length > 0 ? parts[0] : matchedFolder.Name;
         }
 
+        /// <summary>
+        /// Attempt to read the background color used by the provider's section/title in the sheet template.
+        /// Returns null if not found.
+        /// </summary>
+        //private Color GetProviderColor(SheetsService sheetsService, string sheetName, string providerName)
+        //{
+        //    if (sheetsService == null || string.IsNullOrWhiteSpace(sheetName) || string.IsNullOrWhiteSpace(providerName))
+        //        return null;
+
+        //    try
+        //    {
+        //        var req = sheetsService.Spreadsheets.Get(_spreadsheetId);
+        //        req.Ranges = new List<string> { sheetName };
+        //        req.IncludeGridData = true;
+        //        var ss = req.Execute();
+        //        var sheet = ss.Sheets.FirstOrDefault(s => s.Properties.Title == sheetName);
+        //        if (sheet?.Data == null) return null;
+
+        //        foreach (var grid in sheet.Data)
+        //        {
+        //            if (grid.RowData == null) continue;
+        //            foreach (var row in grid.RowData)
+        //            {
+        //                if (row.Values == null) continue;
+        //                foreach (var cell in row.Values)
+        //                {
+        //                    string text = cell.FormattedValue ?? cell.EffectiveValue?.StringValue ?? cell.UserEnteredValue?.StringValue;
+        //                    if (string.IsNullOrWhiteSpace(text)) continue;
+        //                    if (text.IndexOf(providerName, StringComparison.OrdinalIgnoreCase) >= 0)
+        //                    {
+        //                        var color = cell.UserEnteredFormat?.BackgroundColor;
+        //                        if (color != null)
+        //                        {
+        //                            _mainForm.Log($"Provider '{providerName}' color found: R={color.Red}, G={color.Green}, B={color.Blue}");
+        //                            return color;
+        //                        }
+        //                    }
+        //                }
+        //            }
+        //        }
+
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _mainForm.Log($"Error while reading provider color: {ex.Message}");
+        //    }
+
+        //    return null;
+        //}
+
+        /// <summary>
+        /// Gets the provider's TABLE color from the border color
+        /// of the provider title/header section.
+        /// Example:
+        /// AMANDA  -> Black
+        /// KRINA   -> Orange
+        /// AMURTA  -> Magenta
+        /// MIKHAIL -> Blue
+        /// SARAH   -> Green
+        /// </summary>
+        private Color GetProviderColor(
+            SheetsService sheetsService,
+            string sheetName,
+            string providerName)
+        {
+            if (sheetsService == null ||
+                string.IsNullOrWhiteSpace(sheetName) ||
+                string.IsNullOrWhiteSpace(providerName))
+            {
+                return null;
+            }
+
+            try
+            {
+                var req = sheetsService.Spreadsheets.Get(_spreadsheetId);
+
+                req.Ranges = new List<string> { sheetName };
+
+                // We need formatting information
+                req.IncludeGridData = true;
+
+                var ss = req.Execute();
+
+                var sheet = ss.Sheets
+                    .FirstOrDefault(s => s.Properties.Title == sheetName);
+
+                if (sheet?.Data == null)
+                    return null;
+
+                foreach (var grid in sheet.Data)
+                {
+                    if (grid.RowData == null)
+                        continue;
+
+                    foreach (var row in grid.RowData)
+                    {
+                        if (row.Values == null)
+                            continue;
+
+                        foreach (var cell in row.Values)
+                        {
+                            string text =
+                                cell.FormattedValue ??
+                                cell.EffectiveValue?.StringValue ??
+                                cell.UserEnteredValue?.StringValue;
+
+                            if (string.IsNullOrWhiteSpace(text))
+                                continue;
+
+                            // Find provider title row
+                            if (text.IndexOf(
+                                providerName,
+                                StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                // -------------------------------------------------
+                                // IMPORTANT:
+                                // The provider table color is NOT the background
+                                // color of the provider title.
+                                //
+                                // The table color is present in the BORDER color.
+                                // -------------------------------------------------
+
+                                var borders =
+                                    cell.EffectiveFormat?.Borders ??
+                                    cell.UserEnteredFormat?.Borders;
+
+                                if (borders == null)
+                                    continue;
+
+                                // Try Top border first
+                                if (borders.Top?.Color != null)
+                                {
+                                    var color = borders.Top.Color;
+
+                                    _mainForm.Log(
+                                        $"Provider '{providerName}' table color found from TOP border: " +
+                                        $"R={color.Red}, G={color.Green}, B={color.Blue}");
+
+                                    return color;
+                                }
+
+                                // Try Bottom border
+                                if (borders.Bottom?.Color != null)
+                                {
+                                    var color = borders.Bottom.Color;
+
+                                    _mainForm.Log(
+                                        $"Provider '{providerName}' table color found from BOTTOM border: " +
+                                        $"R={color.Red}, G={color.Green}, B={color.Blue}");
+
+                                    return color;
+                                }
+
+                                // Try Left border
+                                if (borders.Left?.Color != null)
+                                {
+                                    var color = borders.Left.Color;
+
+                                    _mainForm.Log(
+                                        $"Provider '{providerName}' table color found from LEFT border: " +
+                                        $"R={color.Red}, G={color.Green}, B={color.Blue}");
+
+                                    return color;
+                                }
+
+                                // Try Right border
+                                if (borders.Right?.Color != null)
+                                {
+                                    var color = borders.Right.Color;
+
+                                    _mainForm.Log(
+                                        $"Provider '{providerName}' table color found from RIGHT border: " +
+                                        $"R={color.Red}, G={color.Green}, B={color.Blue}");
+
+                                    return color;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _mainForm.Log(
+                    $"Error while reading provider table color: {ex.Message}");
+            }
+
+            return null;
+        }
+
         public async Task MarkMessageAsReadAsync(string messageId)
         {
             var GServices = _mainForm.Service;
@@ -1152,9 +1391,10 @@ namespace EmailPDFMatchKeyword
                              (ccHeader != "" ? $" | CC: {ccHeader}" : "") +
                              $" | Subject: {subject}");
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                throw ex;
+                // Preserve original stack trace when rethrowing
+                throw;
             }
         }
 
@@ -2579,17 +2819,61 @@ namespace EmailPDFMatchKeyword
             return tableRows;
         }
 
-        // Business rule: target sheet date is exactly the EMAIL RECEIVED DATE in IST (date portion only)
-        // This must not depend on current system date or any "next business day" heuristics.
-        public DateTime CalculateTargetSheetDate(DateTime emailReceivedIst)
+        public DateTime CalculateTargetSheetDate(DateTime now)
         {
-            // emailReceivedIst is expected to already be converted to India Standard Time
-            return emailReceivedIst.Date;
+            var time = now.TimeOfDay;
+            var cutoff = new TimeSpan(17, 0, 0); // 5 PM
+
+            switch (now.DayOfWeek)
+            {
+                case DayOfWeek.Monday:
+                    return now.Date.AddDays(time < cutoff ? 1 : 2); // Tue / Wed
+
+                case DayOfWeek.Tuesday:
+                    return now.Date.AddDays(time < cutoff ? 1 : 2); // Wed / Thu
+
+                case DayOfWeek.Wednesday:
+                    return now.Date.AddDays(time < cutoff ? 1 : 2); // Thu / Fri
+
+                case DayOfWeek.Thursday:
+                    return time < cutoff
+                        ? now.Date.AddDays(1) // Friday
+                        : GetNextWeekday(now, DayOfWeek.Monday); // Monday
+
+                case DayOfWeek.Friday:
+                    return GetNextWeekday(now, DayOfWeek.Monday); // Always Monday
+
+                case DayOfWeek.Saturday:
+                    return time < cutoff
+                        ? GetNextWeekday(now, DayOfWeek.Monday) // before 5PM → Monday
+                        : GetNextWeekday(now, DayOfWeek.Tuesday); // after 5PM → Tuesday
+
+                case DayOfWeek.Sunday:
+                    return GetNextWeekday(now, DayOfWeek.Tuesday); // always → Tuesday
+
+                default:
+                    return now.Date.AddDays(1);
+            }
+        }
+
+        private DateTime GetNextWeekday(DateTime from, DayOfWeek day)
+        {
+            int daysToAdd = ((int)day - (int)from.DayOfWeek + 7) % 7;
+            if (daysToAdd == 0) daysToAdd = 7;
+            return from.Date.AddDays(daysToAdd);
         }
 
 
-		public async Task ProcessAndUploadFilesAsync(DateTime emailReceivedUtc, string caseNumber, string CLAIMANTNAME, string Status, string PROVIDER, List<(string fileName, byte[] data)> attachments, Google.Apis.Drive.v3.DriveService Driveservices)
-		{
+        public async Task ProcessAndUploadFilesAsync(
+    DateTime emailReceivedUtc,
+    string caseNumber,
+    string CLAIMANTNAME,
+    string Status,
+    string PROVIDER,
+    List<(string fileName, byte[] data)> attachments,
+    Google.Apis.Drive.v3.DriveService Driveservices,
+    DateTime targetSheetDate)
+        {
 			try
 			{
                 // --- Use India Standard Time for business date decisions ---
@@ -2602,8 +2886,8 @@ namespace EmailPDFMatchKeyword
                 _mainForm.Log($"📧 Email received (IST): {emailReceivedIndia:yyyy-MM-dd HH:mm:ss} (IST)");
 
                 // Use emailReceivedIndia for sheet-date logic
-                DateTime targetDate = CalculateTargetSheetDate(emailReceivedIndia);
-				string today = targetDate.ToString("MM.dd");
+                DateTime targetDate = targetSheetDate.Date;
+                string today = targetDate.ToString("MM.dd");
 
 
 				//DateTime targetDate = CalculateTargetSheetDate(usNow);
